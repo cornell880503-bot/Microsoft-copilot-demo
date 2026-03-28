@@ -50,7 +50,8 @@ def send_email(
             attached_name = file_path.name
             logger.info("Attached file: %s", file_path.name)
         else:
-            logger.warning("Attachment not found, skipping: %s", file_path)
+            logger.error("Attachment file not found: %r (resolved: %r)", attachment_path, str(file_path))
+            raise FileNotFoundError(f"Attachment not found: {file_path}")
 
     logger.info("Sending email to=%s subject=%r via %s:%d", to, subject, host, port)
 
