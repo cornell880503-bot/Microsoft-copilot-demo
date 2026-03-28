@@ -75,23 +75,33 @@ Respond with ONLY the enhanced prompt text, no explanation.
 """
 
 
-def _find_cv_in_rag(rag_results: list[dict]) -> str | None:
+def _find_cv_file() -> str | None:
     """
-    Scan RAG result sources for a PDF whose filename suggests it's a CV/resume.
-    Returns the absolute path of the best match, or None.
+    Find the most recent CV/resume PDF by scanning known local directories.
+    Prefers files with 'cv' or 'resume' in the name, sorted by modification time.
     """
     cv_keywords = {"cv", "resume", "curriculum"}
+    search_dirs = [Path.home() / "Downloads", Path.home() / "Documents", Path.home() / "Desktop"]
+    extra = os.getenv("EXTRA_DATA_DIRS", "")
+    for p in extra.split(":"):
+        if p.strip():
+            search_dirs.append(Path(p.strip()).expanduser())
+
     candidates = []
-    for r in rag_results:
-        src = r.get("source", "")
-        name = Path(src).name.lower()
-        if src.endswith(".pdf") and any(kw in name for kw in cv_keywords):
-            candidates.append((r["score"], src))
+    for folder in search_dirs:
+        if not folder.exists():
+            continue
+        for f in folder.glob("*.pdf"):
+            if any(kw in f.name.lower() for kw in cv_keywords):
+                candidates.append(f)
+
     if not candidates:
         return None
-    # Return the path with the highest relevance score
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1]
+
+    # Return the most recently modified CV file
+    candidates.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    logger.info("Found CV candidates: %s", [f.name for f in candidates[:3]])
+    return str(candidates[0])
 
 
 def _sse(data: dict) -> str:
@@ -258,7 +268,7 @@ async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
             if action == "SEND_EMAIL" and not action_payload.get("attachment_path"):
                 cv_keywords = {"cv", "resume", "curriculum vitae"}
                 if any(kw in user_input.lower() for kw in cv_keywords):
-                    pdf_path = _find_cv_in_rag(rag_results)
+                    pdf_path = _find_cv_file()
                     if pdf_path:
                         action_payload["attachment_path"] = pdf_path
                         yield _sse({"step": "search", "text": f"Auto-attaching CV: {Path(pdf_path).name}"})
