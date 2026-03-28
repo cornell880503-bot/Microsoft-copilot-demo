@@ -25,15 +25,20 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
 
   const handleConfirm = async () => {
     setConfirmed(true);
-    await window.orion?.confirmAction(action);
-    onConfirm?.(action, fields);
+    const result = await window.orion?.confirmAction(action, fields);
+    onConfirm?.(action, fields, result);
   };
+
+  const confirmedMessage = {
+    SEND_EMAIL: 'Email opened in your mail app',
+    SAVE_FILE:  `File saved to ~/Downloads/${fields.filename || 'file'}`,
+  }[action] || 'Action synced to your Office workflow';
 
   if (confirmed) {
     return (
       <div className="action-card action-card-confirmed">
         <span className="action-confirmed-icon">✓</span>
-        <span>Action synced to your Office workflow</span>
+        <span>{confirmedMessage}</span>
       </div>
     );
   }

@@ -87,6 +87,10 @@ class IndexRequest(BaseModel):
 class AgentRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
 
+class SaveFileRequest(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    content:  str = Field(...)
+
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -125,6 +129,24 @@ async def search_documents(body: SearchRequest):
         )
     except Exception as e:
         logger.exception("Search failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/save-file")
+async def save_file(body: SaveFileRequest):
+    """Write content to ~/Downloads/<filename>. Returns the saved path."""
+    # Sanitize filename — strip path separators to prevent directory traversal
+    safe_name = Path(body.filename).name
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    save_path = Path.home() / "Downloads" / safe_name
+    try:
+        save_path.write_text(body.content, encoding="utf-8")
+        logger.info("Saved file: %s", save_path)
+        return {"saved_to": str(save_path), "filename": safe_name}
+    except Exception as e:
+        logger.exception("Failed to save file")
         raise HTTPException(status_code=500, detail=str(e))
 
 

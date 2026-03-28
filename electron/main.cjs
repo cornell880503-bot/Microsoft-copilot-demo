@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, Notification, screen } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, Notification, shell, screen } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs   = require('fs');
@@ -142,7 +142,27 @@ app.on('will-quit', () => {
 ipcMain.on('hide-window',   hideWindow);
 ipcMain.on('show-window',   showWindow);
 ipcMain.handle('get-platform', () => process.platform);
-ipcMain.handle('confirm-action', (_event, action) => {
-  showActionNotification(action);
-  return { ok: true };
+ipcMain.handle('confirm-action', async (_event, action, fields) => {
+  try {
+    if (action === 'SEND_EMAIL') {
+      const to      = encodeURIComponent(fields.to      || '');
+      const subject = encodeURIComponent(fields.subject || '');
+      const body    = encodeURIComponent(fields.body    || '');
+      await shell.openExternal(`mailto:${to}?subject=${subject}&body=${body}`);
+    }
+
+    if (action === 'SAVE_FILE') {
+      await fetch('http://127.0.0.1:8765/save-file', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ filename: fields.filename, content: fields.content }),
+      });
+    }
+
+    showActionNotification(action);
+    return { ok: true };
+  } catch (err) {
+    console.error('[confirm-action] error:', err);
+    return { ok: false, error: err.message };
+  }
 });

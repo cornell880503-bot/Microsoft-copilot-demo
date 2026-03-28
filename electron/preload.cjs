@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('orion', {
   hideWindow:     () => ipcRenderer.send('hide-window'),
   showWindow:     () => ipcRenderer.send('show-window'),
   getPlatform:    () => ipcRenderer.invoke('get-platform'),
-  confirmAction:  (action) => ipcRenderer.invoke('confirm-action', action),
+  confirmAction:  (action, fields) => ipcRenderer.invoke('confirm-action', action, fields),
 
   sidecar: {
     health:       () => fetch(`${SIDECAR}/health`).then((r) => r.json()),
