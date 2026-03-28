@@ -33,6 +33,8 @@ export default function CommandPalette() {
   const [thoughts, setThoughts]       = useState(INITIAL_THOUGHTS);
   const [isProcessing, setIsProcessing] = useState(false);
   const [displayMode, setDisplayMode]   = useState('user');
+  // Conversation history sent to the model for multi-turn context
+  const [history, setHistory]           = useState([]);
 
   const addThought = useCallback((thought) => {
     setThoughts((prev) => [...prev, { id: nextId(), ...thought }]);
@@ -45,11 +47,14 @@ export default function CommandPalette() {
     setQuery('');
     setIsProcessing(true);
 
+    // Capture what the assistant does this turn for history
+    let assistantSummary = '';
+
     try {
       const response = await fetch(`${SIDECAR}/agent/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: value }),
+        body: JSON.stringify({ query: value, history }),
       });
 
       if (!response.ok) throw new Error(`Sidecar error: ${response.status}`);
@@ -75,10 +80,14 @@ export default function CommandPalette() {
 
           if (step === 'result') {
             addThought({ type: 'result', thought, action, payload });
+            assistantSummary = String(payload || '');
           } else if (step === 'image') {
             addThought({ type: 'image', thought, action, image_data, prompt });
+            assistantSummary = `[Generated image with prompt: "${(prompt || '').slice(0, 120)}". The image is saved and can be attached to an email if you ask.]`;
           } else if (step === 'action_card') {
             addThought({ type: 'action_card', thought, action, payload });
+            const summary = typeof payload === 'object' ? JSON.stringify(payload) : String(payload);
+            assistantSummary = `[Proposed ${action}: ${summary}]`;
           } else if (step === 'error') {
             addThought({ type: 'error', text });
           } else {
@@ -95,8 +104,16 @@ export default function CommandPalette() {
       });
     } finally {
       setIsProcessing(false);
+      // Append this Q&A to conversation history (keep last 20 messages = 10 turns)
+      if (assistantSummary) {
+        setHistory(prev => [
+          ...prev,
+          { role: 'user',      content: value },
+          { role: 'assistant', content: assistantSummary },
+        ].slice(-20));
+      }
     }
-  }, [isProcessing, addThought]);
+  }, [isProcessing, addThought, history]);
 
   const handleActionConfirm = useCallback((action, fields) => {
     addThought({ type: 'success', text: `✓ ${action} confirmed — synced to Office workflow` });

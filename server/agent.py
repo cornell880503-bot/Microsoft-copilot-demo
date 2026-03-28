@@ -127,7 +127,8 @@ def _clean_json(raw: str) -> str:
     return raw
 
 
-def _build_prompt(user_input: str, active_window: str, rag_results: list[dict]) -> str:
+def _build_user_turn(user_input: str, active_window: str, rag_results: list[dict]) -> str:
+    """Build the current user turn text (system prompt goes in system_instruction)."""
     rag_section = ""
     if rag_results:
         excerpts = "\n---\n".join(
@@ -136,7 +137,6 @@ def _build_prompt(user_input: str, active_window: str, rag_results: list[dict]) 
         )
         rag_section = f"\n\nLocal Knowledge Base Results:\n{excerpts}"
     return (
-        f"{SYSTEM_PROMPT}\n\n"
         f"Active Application: {active_window or 'Unknown'}\n"
         f"User Query: {user_input}"
         f"{rag_section}"
@@ -207,7 +207,7 @@ async def _generate_image(
     return None, augmented
 
 
-async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
+async def run_agent_stream(user_input: str, history: list[dict] | None = None) -> AsyncGenerator[str, None]:
     # ── Step 1: Window Context ─────────────────────────────────────────────
     yield _sse({"step": "context", "text": "Reading your active application..."})
     active_window = get_active_window_title() or "Unknown"
@@ -237,9 +237,20 @@ async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
 
     try:
         client = genai.Client(api_key=api_key)
-        prompt = _build_prompt(user_input, active_window, rag_results)
 
-        response = client.models.generate_content(model=model_name, contents=prompt)
+        # Build multi-turn contents: previous history + current user turn
+        contents = []
+        for msg in (history or []):
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+        contents.append({"role": "user", "parts": [{"text": _build_user_turn(user_input, active_window, rag_results)}]})
+
+        logger.info("Sending %d-turn conversation to Gemini", len(contents))
+        response = client.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+        )
         raw = _clean_json(response.text)
         result = json.loads(raw)
 

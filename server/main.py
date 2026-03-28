@@ -85,8 +85,13 @@ class SearchResponse(BaseModel):
 class IndexRequest(BaseModel):
     extra_dirs: list[str] = Field(default_factory=list, description="Extra absolute folder paths to index")
 
+class HistoryMessage(BaseModel):
+    role: str       # "user" | "assistant"
+    content: str
+
 class AgentRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=2000)
+    query:   str = Field(..., min_length=1, max_length=2000)
+    history: list[HistoryMessage] = Field(default_factory=list)
 
 class SaveFileRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255)
@@ -186,7 +191,7 @@ async def agent_run(body: AgentRequest):
       {"step": "result", "thought": str, "action": str, "payload": str}
     """
     return StreamingResponse(
-        run_agent_stream(body.query),
+        run_agent_stream(body.query, [{"role": m.role, "content": m.content} for m in body.history]),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
