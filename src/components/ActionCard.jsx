@@ -24,9 +24,18 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
   );
   const [editing, setEditing]     = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const [error, setError]         = useState('');
+  const [sending, setSending]     = useState(false);
+
+  const handleCancel = () => {
+    setCancelled(true);
+    onCancel?.();
+  };
 
   const handleConfirm = async () => {
-    setConfirmed(true);
+    setSending(true);
+    setError('');
     try {
       if (action === 'SEND_EMAIL') {
         const res = await fetch(`${SIDECAR}/send-email`, {
@@ -40,28 +49,37 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
           }),
         });
         if (!res.ok) {
-          const err = await res.json();
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
           throw new Error(err.detail || 'Failed to send email');
         }
       } else if (action === 'SAVE_FILE') {
-        await fetch(`${SIDECAR}/save-file`, {
+        const res = await fetch(`${SIDECAR}/save-file`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ filename: fields.filename, content: fields.content }),
         });
-      } else {
-        await window.orion?.confirmAction(action, fields);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          throw new Error(err.detail || 'Failed to save file');
+        }
       }
+      setConfirmed(true);
+      onConfirm?.(action, fields);
     } catch (err) {
-      console.error('[ActionCard] confirm error:', err);
+      setError(err.message);
+    } finally {
+      setSending(false);
     }
-    onConfirm?.(action, fields);
   };
 
   const confirmedMessage = {
     SEND_EMAIL: `Email sent to ${fields.to}${fields.attachment_path ? ' with attachment' : ''}`,
     SAVE_FILE:  `File saved to ~/Downloads/${fields.filename || 'file'}`,
   }[action] || 'Action synced to your Office workflow';
+
+  if (cancelled) {
+    return null;  // disappear cleanly
+  }
 
   if (confirmed) {
     return (
@@ -107,18 +125,22 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
         ))}
       </div>
 
+      {/* Error */}
+      {error && (
+        <div style={{ fontSize: 11, color: '#D13438', background: 'rgba(209,52,56,0.07)', borderRadius: 6, padding: '6px 10px' }}>
+          ⚠ {error}
+        </div>
+      )}
+
       {/* Buttons */}
       <div className="action-card-buttons">
-        <button className="action-btn action-btn-confirm" onClick={handleConfirm}>
-          ✓ Confirm
+        <button className="action-btn action-btn-confirm" onClick={handleConfirm} disabled={sending}>
+          {sending ? '⏳ Sending…' : '✓ Confirm'}
         </button>
-        <button
-          className="action-btn action-btn-edit"
-          onClick={() => setEditing((v) => !v)}
-        >
+        <button className="action-btn action-btn-edit" onClick={() => setEditing((v) => !v)} disabled={sending}>
           {editing ? '✓ Done' : '✏ Edit'}
         </button>
-        <button className="action-btn action-btn-cancel" onClick={onCancel}>
+        <button className="action-btn action-btn-cancel" onClick={handleCancel} disabled={sending}>
           ✕ Cancel
         </button>
       </div>

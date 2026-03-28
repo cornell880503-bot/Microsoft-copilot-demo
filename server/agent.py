@@ -58,7 +58,11 @@ Action selection rules:
 
 For SEND_EMAIL, structure payload as JSON string:
 {"to":"...","subject":"...","body":"...","attachment_path":null}
-IMPORTANT for body: write the email body FROM the user's perspective, addressed TO the recipient — as if the user is sending it. Do NOT write a response back to the user. Do NOT ask for clarification. Write a complete, professional email ready to send.
+CRITICAL rules for the body field:
+- Write as the sender (user), addressed TO the recipient — a complete professional email ready to send
+- NEVER mention file paths, system paths, or technical details in the body
+- NEVER ask for clarification or write meta-commentary — just write the email
+- attachment_path must always be null (the system handles attachments automatically)
 For SAVE_FILE, structure payload as JSON string: {"filename":"...","content":"..."}
 
 Tailor your tone to the active application context.
