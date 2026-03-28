@@ -11,6 +11,7 @@ import logging
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -36,11 +37,23 @@ def capture_screen_base64() -> Optional[str]:
     tmp = Path(tempfile.mktemp(suffix=".png"))
     try:
         if platform == "darwin":
-            # macOS: screencapture -x (no sound) -t png
+            # Hide Electron window so background app is fully visible
             subprocess.run(
-                ["screencapture", "-x", "-t", "png", str(tmp)],
-                check=True, timeout=5, capture_output=True,
+                ["osascript", "-e", 'tell application "Electron" to set visible to false'],
+                timeout=3, capture_output=True,
             )
+            time.sleep(0.35)
+            try:
+                subprocess.run(
+                    ["screencapture", "-x", "-t", "png", str(tmp)],
+                    check=True, timeout=5, capture_output=True,
+                )
+            finally:
+                # Always restore the window
+                subprocess.run(
+                    ["osascript", "-e", 'tell application "Electron" to set visible to true'],
+                    timeout=3, capture_output=True,
+                )
         elif platform == "linux":
             # Try scrot, fall back to gnome-screenshot
             try:
