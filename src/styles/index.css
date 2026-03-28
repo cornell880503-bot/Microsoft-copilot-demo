@@ -20,7 +20,7 @@ html, body, #root {
 
 .app-root {
   width: 600px;
-  height: 400px;
+  height: 480px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -30,7 +30,7 @@ html, body, #root {
 /* ─── Palette Shell — Microsoft Copilot Light Acrylic ───────────────────────── */
 .palette-shell {
   width: 600px;
-  height: 400px;
+  height: 480px;
   display: flex;
   flex-direction: column;
   border-radius: 14px;
@@ -315,6 +315,17 @@ html, body, #root {
   letter-spacing: 0.03em;
 }
 
+/* ─── Thought Entry Animation (staggered) ───────────────────────────────────── */
+.thought-entry {
+  animation: thought-in 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: var(--entry-delay, 0ms);
+}
+
+@keyframes thought-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
 /* ─── Result Card ────────────────────────────────────────────────────────────── */
 .result-card {
   margin: 4px 0;
@@ -369,6 +380,260 @@ html, body, #root {
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ─── Image Result Card ──────────────────────────────────────────────────────── */
+.image-card {
+  margin: 6px 0;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(0, 80, 180, 0.12);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: card-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  box-shadow: 0 2px 8px rgba(0, 80, 180, 0.08);
+}
+
+@keyframes card-pop {
+  from { opacity: 0; transform: scale(0.94) translateY(8px); filter: blur(4px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0);   filter: blur(0); }
+}
+
+.image-card-thought {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  color: #505d70;
+  line-height: 1.5;
+}
+
+.image-card-frame {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  max-height: 180px;
+  transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.image-card-frame.expanded {
+  max-height: 400px;
+}
+
+.image-card-img {
+  width: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 8px;
+  transition: filter 0.2s;
+}
+
+.image-card-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 20px 12px 8px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.35));
+  color: rgba(255,255,255,0.85);
+  font-size: 10px;
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+
+.image-card-prompt {
+  font-size: 10px;
+  color: #8a9ab0;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.image-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.img-btn {
+  flex: 1;
+  padding: 5px 0;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 80, 180, 0.2);
+  background: rgba(15, 108, 189, 0.06);
+  color: #0F6CBD;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  font-family: inherit;
+}
+
+.img-btn:hover {
+  background: rgba(15, 108, 189, 0.12);
+  transform: translateY(-1px);
+}
+
+.img-btn:active {
+  transform: translateY(0);
+}
+
+/* ─── Action Card ─────────────────────────────────────────────────────────────── */
+.action-card {
+  margin: 6px 0;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1.5px solid rgba(0, 80, 180, 0.14);
+  border-left: 3px solid var(--action-color, #0F6CBD);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  animation: card-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  box-shadow: 0 2px 10px rgba(0, 80, 180, 0.08);
+}
+
+.action-card-confirmed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(16, 124, 16, 0.06);
+  border: 1px solid rgba(16, 124, 16, 0.25);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #107C10;
+  font-weight: 600;
+  animation: card-pop 0.2s ease both;
+}
+
+.action-confirmed-icon {
+  font-size: 14px;
+}
+
+.action-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.action-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.action-card-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid;
+}
+
+.action-card-thought {
+  font-size: 11px;
+  color: #606c80;
+  line-height: 1.5;
+}
+
+.action-card-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.action-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.action-field-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #8a9ab0;
+  text-transform: uppercase;
+}
+
+.action-field-value {
+  font-size: 12px;
+  color: #1a1a2e;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.action-field-input {
+  font-size: 12px;
+  color: #1a1a2e;
+  background: rgba(255,255,255,0.9);
+  border: 1px solid rgba(0, 80, 180, 0.2);
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+  width: 100%;
+}
+
+.action-field-input:focus {
+  border-color: #0F6CBD;
+  box-shadow: 0 0 0 2px rgba(15, 108, 189, 0.12);
+}
+
+.action-card-buttons {
+  display: flex;
+  gap: 7px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 6px 0;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid;
+  font-family: inherit;
+  transition: transform 0.12s, box-shadow 0.12s, background 0.15s;
+}
+
+.action-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.action-btn:active { transform: translateY(0); box-shadow: none; }
+
+.action-btn-confirm {
+  background: linear-gradient(135deg, #107C10, #0d6b0d);
+  color: white;
+  border-color: #107C10;
+}
+
+.action-btn-edit {
+  background: rgba(15, 108, 189, 0.07);
+  color: #0F6CBD;
+  border-color: rgba(15, 108, 189, 0.3);
+}
+
+.action-btn-cancel {
+  background: rgba(209, 52, 56, 0.06);
+  color: #D13438;
+  border-color: rgba(209, 52, 56, 0.25);
+}
+
+/* ─── Search submit pulse ────────────────────────────────────────────────────── */
+.search-wrapper.submitting {
+  animation: search-pulse 0.4s ease;
+}
+
+@keyframes search-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(15, 108, 189, 0.4); }
+  70%  { box-shadow: 0 0 0 8px rgba(15, 108, 189, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(15, 108, 189, 0); }
 }
 
 /* ─── Spinner ────────────────────────────────────────────────────────────────── */

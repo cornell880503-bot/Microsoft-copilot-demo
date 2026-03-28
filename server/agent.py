@@ -4,11 +4,13 @@ Copilot Agent — orchestrates the full pipeline:
   2. Semantic search over local docs
   3. Stream step-by-step thoughts via SSE
   4. Call Gemini Flash and emit structured result
+  5. If GENERATE_IMAGE: auto-augment prompt + call Gemini image model → base64
 
 SSE event shape:
-  { "step": "context"|"search"|"think"|"result"|"error", "text"?: str, ...result fields }
+  { "step": "context"|"search"|"think"|"result"|"image"|"action_card"|"error", ... }
 """
 
+import base64
 import json
 import logging
 import os
@@ -23,9 +25,9 @@ from window_context import get_active_window_title
 
 logger = logging.getLogger(__name__)
 
-# ── Model ─────────────────────────────────────────────────────────────────────
-# Override with GEMINI_MODEL env var (e.g. "gemini-3-flash" when available)
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL       = "gemini-2.0-flash"
+IMAGE_MODEL         = "gemini-3.1-flash-image-preview"
+IMAGE_MODEL_FALLBACK = "gemini-2.0-flash-exp-image-generation"
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """\
@@ -41,26 +43,41 @@ Your job is to analyze this context and choose the most useful action.
 You MUST respond with ONLY a single valid JSON object — no markdown, no explanation, no code fences:
 {
   "thought": "<1–2 sentence reasoning about what the user needs and why you chose this action>",
-  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE>",
-  "payload": "<the actual useful output: answer, drafted text, image description, or refined search query>"
+  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE>",
+  "payload": "<the actual useful output: answer, drafted text, image description, email body, or file content>"
 }
 
 Action selection rules:
-- SEARCH_LOCAL_DOCS  → user asks about local files, projects, or knowledge base content
-- DRAFT_CONTENT      → user wants text written, summarized, explained, or analyzed
-- GENERATE_IMAGE     → user explicitly asks to create, describe, or visualize an image
+- SEARCH_LOCAL_DOCS → user asks about local files, projects, or knowledge base content
+- DRAFT_CONTENT     → user wants text written, summarized, explained, or analyzed
+- GENERATE_IMAGE    → user explicitly asks to create, describe, or visualize an image
+- SEND_EMAIL        → user wants to compose and send an email to someone
+- SAVE_FILE         → user wants to save content to a file on their computer
 
-Tailor your tone to the active application context (e.g. be concise in a terminal, detailed in a doc editor).
+For SEND_EMAIL, structure payload as JSON string: {"to":"...","subject":"...","body":"..."}
+For SAVE_FILE, structure payload as JSON string: {"filename":"...","content":"..."}
+
+Tailor your tone to the active application context.
+"""
+
+IMAGE_AUGMENT_PROMPT = """\
+The user is currently working in: {active_window}
+Original image request: {original_prompt}
+
+Create an enhanced, detailed image generation prompt that:
+1. Incorporates the context of the active application
+2. Adds artistic style, lighting, and composition details
+3. Is optimized for AI image generation
+
+Respond with ONLY the enhanced prompt text, no explanation.
 """
 
 
 def _sse(data: dict) -> str:
-    """Format a dict as a Server-Sent Event line."""
     return f"data: {json.dumps(data)}\n\n"
 
 
 def _clean_json(raw: str) -> str:
-    """Strip markdown code fences that Gemini sometimes wraps around JSON."""
     raw = raw.strip()
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
     raw = re.sub(r"\s*```$", "", raw)
@@ -75,7 +92,6 @@ def _build_prompt(user_input: str, active_window: str, rag_results: list[dict]) 
             for r in rag_results
         )
         rag_section = f"\n\nLocal Knowledge Base Results:\n{excerpts}"
-
     return (
         f"{SYSTEM_PROMPT}\n\n"
         f"Active Application: {active_window or 'Unknown'}\n"
@@ -84,12 +100,65 @@ def _build_prompt(user_input: str, active_window: str, rag_results: list[dict]) 
     )
 
 
-async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
+async def _generate_image(
+    client: genai.Client,
+    original_prompt: str,
+    active_window: str,
+    model_name: str,
+) -> tuple[str | None, str]:
     """
-    Generator that yields SSE events driving the Copilot thought feed.
-    Designed to be wrapped in a FastAPI StreamingResponse.
+    Auto-augment the prompt with window context, then generate image.
+    Returns (base64_png_or_none, augmented_prompt).
     """
+    # Step 1: augment the prompt
+    aug_response = client.models.generate_content(
+        model=model_name,
+        contents=IMAGE_AUGMENT_PROMPT.format(
+            active_window=active_window,
+            original_prompt=original_prompt,
+        ),
+    )
+    augmented = aug_response.text.strip()
+    logger.info("Augmented image prompt: %s", augmented[:120])
 
+    # Step 2: generate image with Gemini image model
+    image_model = os.getenv("GEMINI_IMAGE_MODEL", IMAGE_MODEL)
+    try:
+        img_response = client.models.generate_content(
+            model=image_model,
+            contents=augmented,
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE", "TEXT"],
+            ),
+        )
+        for part in img_response.candidates[0].content.parts:
+            if part.inline_data and part.inline_data.mime_type.startswith("image/"):
+                b64 = base64.b64encode(part.inline_data.data).decode("utf-8")
+                mime = part.inline_data.mime_type
+                return f"data:{mime};base64,{b64}", augmented
+    except Exception as e:
+        logger.error("Image generation failed with %s: %s", image_model, e)
+        # Try fallback model
+        try:
+            img_response = client.models.generate_content(
+                model=IMAGE_MODEL_FALLBACK,
+                contents=augmented,
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+            for part in img_response.candidates[0].content.parts:
+                if part.inline_data and part.inline_data.mime_type.startswith("image/"):
+                    b64 = base64.b64encode(part.inline_data.data).decode("utf-8")
+                    mime = part.inline_data.mime_type
+                    return f"data:{mime};base64,{b64}", augmented
+        except Exception as e2:
+            logger.error("Fallback image model also failed: %s", e2)
+
+    return None, augmented
+
+
+async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
     # ── Step 1: Window Context ─────────────────────────────────────────────
     yield _sse({"step": "context", "text": "Reading your active application..."})
     active_window = get_active_window_title() or "Unknown"
@@ -108,7 +177,7 @@ async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
         rag_results = []
         yield _sse({"step": "search", "text": "Local search unavailable — proceeding without context"})
 
-    # ── Step 3: Gemini ─────────────────────────────────────────────────────
+    # ── Step 3: Gemini Decision ────────────────────────────────────────────
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         yield _sse({"step": "error", "text": "GEMINI_API_KEY not set. Add it to server/.env"})
@@ -121,21 +190,56 @@ async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
         client = genai.Client(api_key=api_key)
         prompt = _build_prompt(user_input, active_window, rag_results)
 
-        logger.info("Calling Gemini model=%s prompt_len=%d", model_name, len(prompt))
-        response = client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-        )
+        response = client.models.generate_content(model=model_name, contents=prompt)
         raw = _clean_json(response.text)
-
         result = json.loads(raw)
 
-        # Validate required keys
         for key in ("thought", "action", "payload"):
             if key not in result:
                 raise ValueError(f"Missing key '{key}' in Gemini response")
 
-        yield _sse({"step": "think", "text": f"Decision: {result['action']}"})
+        action = result["action"]
+        yield _sse({"step": "think", "text": f"Decision: {action}"})
+
+        # ── Image Generation ───────────────────────────────────────────────
+        if action == "GENERATE_IMAGE":
+            yield _sse({"step": "think", "text": "Auto-augmenting image prompt with window context..."})
+            image_data, augmented_prompt = await _generate_image(
+                client, result["payload"], active_window, model_name
+            )
+            yield _sse({"step": "think", "text": f"Prompt: {augmented_prompt[:80]}..."})
+            if image_data:
+                yield _sse({
+                    "step": "image",
+                    "thought": result["thought"],
+                    "action": action,
+                    "image_data": image_data,
+                    "prompt": augmented_prompt,
+                })
+            else:
+                yield _sse({
+                    "step": "result",
+                    "thought": result["thought"],
+                    "action": "DRAFT_CONTENT",
+                    "payload": f"Image generation unavailable. Enhanced prompt:\n\n{augmented_prompt}",
+                })
+            return
+
+        # ── Action Cards (SEND_EMAIL / SAVE_FILE) ──────────────────────────
+        if action in ("SEND_EMAIL", "SAVE_FILE"):
+            try:
+                action_payload = json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+            except (json.JSONDecodeError, TypeError):
+                action_payload = {"content": result["payload"]}
+            yield _sse({
+                "step": "action_card",
+                "thought": result["thought"],
+                "action": action,
+                "payload": action_payload,
+            })
+            return
+
+        # ── Default result ─────────────────────────────────────────────────
         yield _sse({"step": "result", **result})
 
     except json.JSONDecodeError:

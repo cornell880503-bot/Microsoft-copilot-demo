@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, Notification, screen } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs   = require('fs');
@@ -16,7 +16,6 @@ function startSidecar() {
     ? path.join(__dirname, '../server')
     : path.join(process.resourcesPath, 'server');
 
-  // Prefer .venv inside /server, fall back to system python3 / python
   const venvPython = path.join(serverDir, '.venv', 'bin', 'python');
   const python = fs.existsSync(venvPython)
     ? venvPython
@@ -36,7 +35,6 @@ function startSidecar() {
 
   sidecarProc.stdout.on('data', (d) => process.stdout.write(`[sidecar] ${d}`));
   sidecarProc.stderr.on('data', (d) => process.stderr.write(`[sidecar] ${d}`));
-
   sidecarProc.on('exit', (code) => {
     console.log(`[sidecar] Exited with code ${code}`);
     sidecarProc = null;
@@ -44,30 +42,27 @@ function startSidecar() {
 }
 
 function stopSidecar() {
-  if (sidecarProc) {
-    sidecarProc.kill();
-    sidecarProc = null;
-  }
+  if (sidecarProc) { sidecarProc.kill(); sidecarProc = null; }
 }
 
 // ── Window ────────────────────────────────────────────────────────────────────
 
 function createWindow() {
-  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
 
   mainWindow = new BrowserWindow({
     width: 600,
-    height: 400,
-    x: Math.round((screenWidth - 600) / 2),
-    y: Math.round((screenHeight - 400) / 2),
+    height: 480,           // slightly taller for image / action cards
+    x: Math.round((sw - 600) / 2),
+    y: Math.round((sh - 480) / 2),
     frame: false,
     transparent: true,
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
     show: false,
-    vibrancy: 'fullscreen-ui',       // macOS
-    backgroundMaterial: 'mica',      // Windows 11
+    vibrancy: 'fullscreen-ui',
+    backgroundMaterial: 'mica',
     backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -89,7 +84,7 @@ function createWindow() {
 function showWindow() {
   if (!mainWindow) return;
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  mainWindow.setPosition(Math.round((sw - 600) / 2), Math.round((sh - 400) / 2));
+  mainWindow.setPosition(Math.round((sw - 600) / 2), Math.round((sh - 480) / 2));
   mainWindow.show();
   mainWindow.focus();
   isVisible = true;
@@ -103,6 +98,24 @@ function hideWindow() {
 
 function toggleWindow() {
   isVisible ? hideWindow() : showWindow();
+}
+
+// ── Native Notification ───────────────────────────────────────────────────────
+
+function showActionNotification(action) {
+  const messages = {
+    SEND_EMAIL: 'Email synced to your Office workflow',
+    SAVE_FILE:  'File saved to your workspace',
+  };
+  const body = messages[action] || 'Action synced to your Office workflow';
+
+  if (Notification.isSupported()) {
+    new Notification({
+      title: 'Copilot',
+      body,
+      silent: false,
+    }).show();
+  }
 }
 
 // ── App Lifecycle ─────────────────────────────────────────────────────────────
@@ -129,3 +142,7 @@ app.on('will-quit', () => {
 ipcMain.on('hide-window',   hideWindow);
 ipcMain.on('show-window',   showWindow);
 ipcMain.handle('get-platform', () => process.platform);
+ipcMain.handle('confirm-action', (_event, action) => {
+  showActionNotification(action);
+  return { ok: true };
+});
