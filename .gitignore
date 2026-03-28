@@ -6,3 +6,5 @@ release/
 *.log
 server/.venv/
 server/chroma_store/
+server/__pycache__/
+server/rag/__pycache__/
