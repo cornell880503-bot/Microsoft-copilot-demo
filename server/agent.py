@@ -110,9 +110,16 @@ def _sse(data: dict) -> str:
 
 def _clean_json(raw: str) -> str:
     raw = raw.strip()
+    # Strip markdown code fences
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
     raw = re.sub(r"\s*```$", "", raw)
-    return raw.strip()
+    raw = raw.strip()
+    # If still not a bare JSON object, extract the first {...} block
+    if not raw.startswith("{"):
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            raw = m.group(0)
+    return raw
 
 
 def _build_prompt(user_input: str, active_window: str, rag_results: list[dict]) -> str:
