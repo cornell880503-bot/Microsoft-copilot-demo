@@ -32,6 +32,7 @@ export default function CommandPalette() {
   const [query, setQuery]             = useState('');
   const [thoughts, setThoughts]       = useState(INITIAL_THOUGHTS);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [displayMode, setDisplayMode]   = useState('user');
 
   const addThought = useCallback((thought) => {
     setThoughts((prev) => [...prev, { id: nextId(), ...thought }]);
@@ -114,6 +115,22 @@ export default function CommandPalette() {
           <CopilotIcon />
           <span className="copilot-label">Copilot</span>
         </div>
+
+        <div className="mode-toggle" role="group" aria-label="Display mode">
+          <button
+            className={`mode-toggle-btn${displayMode === 'user' ? ' mode-toggle-active' : ''}`}
+            onClick={() => setDisplayMode('user')}
+          >
+            User
+          </button>
+          <button
+            className={`mode-toggle-btn${displayMode === 'demo' ? ' mode-toggle-active' : ''}`}
+            onClick={() => setDisplayMode('demo')}
+          >
+            Demo
+          </button>
+        </div>
+
         <button className="close-btn" onClick={() => window.orion?.hideWindow()} aria-label="Close">
           ✕
         </button>
@@ -133,6 +150,7 @@ export default function CommandPalette() {
         isProcessing={isProcessing}
         onActionConfirm={handleActionConfirm}
         onActionCancel={handleActionCancel}
+        displayMode={displayMode}
       />
 
       <div className="palette-footer">

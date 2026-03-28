@@ -86,7 +86,7 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
       </div>
 
       {/* Thought */}
-      <div className="action-card-thought">💭 {thought}</div>
+      {thought && <div className="action-card-thought">💭 {thought}</div>}
 
       {/* Fields */}
       <div className="action-card-fields">
