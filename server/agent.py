@@ -15,7 +15,8 @@ import os
 import re
 from typing import AsyncGenerator
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from rag.searcher import search_docs
 from window_context import get_active_window_title
@@ -117,12 +118,14 @@ async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
     yield _sse({"step": "think", "text": f"Consulting {model_name}..."})
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name)
+        client = genai.Client(api_key=api_key)
         prompt = _build_prompt(user_input, active_window, rag_results)
 
         logger.info("Calling Gemini model=%s prompt_len=%d", model_name, len(prompt))
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+        )
         raw = _clean_json(response.text)
 
         result = json.loads(raw)

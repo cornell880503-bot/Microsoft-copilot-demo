@@ -12,6 +12,6 @@ chromadb
 sentence-transformers
 
 # Gemini
-google-generativeai
+google-genai
 
 # Windows-only: pip install pywin32
