@@ -58,40 +58,47 @@ function messagesToThoughts(messages) {
    SIDEBAR
    ══════════════════════════════════════════════════════════════ */
 function ChatItem({ chat, isActive, onSelect, onDelete, onRename }) {
-  const [renaming, setRenaming] = React.useState(false);
+  const [menuOpen, setMenuOpen]   = React.useState(false);
+  const [renaming, setRenaming]   = React.useState(false);
   const [draftName, setDraftName] = React.useState('');
+  const menuRef  = React.useRef(null);
   const inputRef = React.useRef(null);
 
-  const startRename = (e) => {
-    e.stopPropagation();
+  // Close menu when clicking outside
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuOpen]);
+
+  const startRename = () => {
+    setMenuOpen(false);
     setDraftName(chat.title);
     setRenaming(true);
-    setTimeout(() => inputRef.current?.select(), 30);
+    setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 30);
   };
 
   const commitRename = () => {
     setRenaming(false);
-    const trimmed = draftName.trim();
-    if (trimmed && trimmed !== chat.title) onRename(chat.id, trimmed);
+    const t = draftName.trim();
+    if (t && t !== chat.title) onRename(chat.id, t);
   };
 
   return (
     <div
       className={`chat-item${isActive ? ' active' : ''}`}
-      onClick={() => !renaming && onSelect(chat.id)}
-      role="option"
-      aria-selected={isActive}
+      onClick={() => !renaming && !menuOpen && onSelect(chat.id)}
     >
       {renaming ? (
         <input
           ref={inputRef}
           className="chat-rename-input"
           value={draftName}
-          autoFocus
           onChange={(e) => setDraftName(e.target.value)}
           onBlur={commitRename}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+            if (e.key === 'Enter')  { e.preventDefault(); commitRename(); }
             if (e.key === 'Escape') setRenaming(false);
           }}
           onClick={(e) => e.stopPropagation()}
@@ -100,9 +107,26 @@ function ChatItem({ chat, isActive, onSelect, onDelete, onRename }) {
         <>
           <span className="chat-item-title">{chat.title}</span>
           <span className="chat-item-date">{formatDate(chat.updated_at)}</span>
-          <div className="chat-item-actions">
-            <button className="chat-action-btn" onClick={startRename} title="Rename">✏</button>
-            <button className="chat-action-btn chat-action-delete" onClick={(e) => { e.stopPropagation(); onDelete(chat.id); }} title="Delete">✕</button>
+
+          {/* Kebab menu button — always visible, no hover dependency */}
+          <div className="chat-menu-wrap" ref={menuRef}>
+            <button
+              className="chat-menu-btn"
+              onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+              aria-label="Chat options"
+            >
+              ···
+            </button>
+            {menuOpen && (
+              <div className="chat-menu-dropdown">
+                <button className="chat-menu-item" onClick={(e) => { e.stopPropagation(); startRename(); }}>
+                  ✏ Rename
+                </button>
+                <button className="chat-menu-item chat-menu-item-danger" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete(chat.id); }}>
+                  🗑 Delete
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}

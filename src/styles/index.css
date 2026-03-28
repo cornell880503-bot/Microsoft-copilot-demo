@@ -905,37 +905,71 @@ html, body, #root {
   letter-spacing: 0.02em;
 }
 
-.chat-item-actions {
+/* ─── Chat item kebab menu ───────────────────────────────────────────────────── */
+.chat-menu-wrap {
   position: absolute;
   right: 5px;
   top: 50%;
   transform: translateY(-50%);
-  display: none;
-  align-items: center;
-  gap: 2px;
   -webkit-app-region: no-drag;
 }
 
-.chat-item:hover .chat-item-actions { display: flex; }
-
-.chat-action-btn {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
+.chat-menu-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
   border: none;
-  background: transparent;
-  color: #9ba8bb;
-  font-size: 9px;
+  background: rgba(255,255,255,0.7);
+  color: #8a9ab0;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  letter-spacing: -1px;
+  line-height: 1;
   transition: background 0.12s, color 0.12s;
   -webkit-app-region: no-drag;
 }
 
-.chat-action-btn:hover { background: rgba(0,80,180,0.1); color: #0F6CBD; }
-.chat-action-delete:hover { background: rgba(209,52,56,0.1); color: #D13438; }
+.chat-menu-btn:hover { background: rgba(15,108,189,0.12); color: #0F6CBD; }
+.chat-item.active .chat-menu-btn { background: rgba(15,108,189,0.08); }
+
+.chat-menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  background: rgba(255,255,255,0.98);
+  border: 1px solid rgba(0,80,180,0.14);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,80,180,0.14), 0 1px 4px rgba(0,0,0,0.08);
+  min-width: 120px;
+  overflow: hidden;
+  z-index: 100;
+  -webkit-app-region: no-drag;
+}
+
+.chat-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-family: inherit;
+  color: #1a2030;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+}
+
+.chat-menu-item:hover { background: rgba(0,80,180,0.06); }
+.chat-menu-item-danger { color: #D13438; }
+.chat-menu-item-danger:hover { background: rgba(209,52,56,0.07); }
 
 .chat-rename-input {
   width: 100%;
@@ -943,7 +977,7 @@ html, body, #root {
   font-family: inherit;
   font-weight: 500;
   color: #1a2030;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255,255,255,0.95);
   border: 1.5px solid #0F6CBD;
   border-radius: 5px;
   padding: 3px 6px;
