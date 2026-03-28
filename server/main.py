@@ -142,6 +142,7 @@ async def search_documents(body: SearchRequest):
 @app.post("/send-email")
 async def send_email_endpoint(body: SendEmailRequest):
     """Send a real email via Gmail/Outlook SMTP with optional file attachment."""
+    logger.info("send-email called: to=%r subject=%r attachment_path=%r", body.to, body.subject, body.attachment_path)
     try:
         result = send_email(
             to=body.to,
