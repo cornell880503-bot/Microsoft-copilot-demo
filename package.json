@@ -2,7 +2,8 @@
   "name": "project-orion",
   "version": "1.0.0",
   "description": "Project Orion - AI Command Palette for Windows 11",
-  "main": "electron/main.js",
+  "main": "electron/main.cjs",
+  "type": "module",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
