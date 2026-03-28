@@ -87,7 +87,7 @@ function ResultCard({ thought }) {
         <span className="result-action-dot" style={{ background: color }} />
         {thought.action}
       </div>
-      <div className="result-payload">{thought.payload}</div>
+      <div className="result-payload"><MarkdownText text={thought.payload} /></div>
     </div>
   );
 }
@@ -97,6 +97,85 @@ function ResultCard({ thought }) {
    ══════════════════════════════════════════════════════════════ */
 
 const USER_MODE_VISIBLE = new Set(['user', 'result', 'image', 'action_card', 'error']);
+
+/* ── Simple markdown renderer (bold + line breaks) ───────────────────────────── */
+function MarkdownText({ text }) {
+  if (!text) return null;
+  // Unescape literal \n that got double-encoded when stored as JSON
+  const str = String(text).replace(/\\n/g, '\n');
+  const paragraphs = str.split(/\n{2,}/);
+  return (
+    <div>
+      {paragraphs.map((para, pi) => {
+        const lines = para.split('\n');
+        return (
+          <p key={pi} style={{ margin: pi > 0 ? '6px 0 0' : '0' }}>
+            {lines.map((line, li) => {
+              // Split on **bold** markers
+              const parts = line.split(/(\*\*[^*]+\*\*)/g);
+              return (
+                <React.Fragment key={li}>
+                  {parts.map((part, i) =>
+                    part.startsWith('**') && part.endsWith('**')
+                      ? <strong key={i}>{part.slice(2, -2)}</strong>
+                      : part
+                  )}
+                  {li < lines.length - 1 && <br />}
+                </React.Fragment>
+              );
+            })}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── Historical action card (loaded from disk) ───────────────────────────────── */
+const ACTION_ICONS = { SEND_EMAIL: '📧', SAVE_FILE: '💾', GENERATE_IMAGE: '🖼' };
+
+function HistoricalActionCard({ content }) {
+  // Parse [Proposed SEND_EMAIL: {...}] or [Generated image: "..."]
+  const match = content.match(/^\[Proposed (SEND_EMAIL|SAVE_FILE): (\{[\s\S]*\})\]$/);
+  if (match) {
+    const action = match[1];
+    let payload = {};
+    try { payload = JSON.parse(match[2]); } catch { /* show raw */ }
+    const icon = ACTION_ICONS[action] || '⚡';
+    const label = action === 'SEND_EMAIL'
+      ? `Sent to ${payload.to || '?'} — "${payload.subject || ''}"`
+      : `Saved ${payload.filename || 'file'}`;
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 7,
+        padding: '7px 11px',
+        background: 'rgba(16,124,16,0.06)',
+        border: '1px solid rgba(16,124,16,0.2)',
+        borderRadius: 8, fontSize: 12, color: '#107C10',
+      }}>
+        <span>{icon}</span>
+        <span style={{ fontWeight: 600 }}>{label}</span>
+      </div>
+    );
+  }
+  // Image history entry
+  if (content.startsWith('[Generated image:')) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 7,
+        padding: '7px 11px',
+        background: 'rgba(134,97,197,0.07)',
+        border: '1px solid rgba(134,97,197,0.2)',
+        borderRadius: 8, fontSize: 12, color: '#8661C5',
+      }}>
+        <span>🖼</span>
+        <span style={{ fontWeight: 600 }}>Image generated</span>
+      </div>
+    );
+  }
+  // Fallback — just render as markdown text
+  return <MarkdownText text={content} />;
+}
 
 function UserBubble({ thought }) {
   const text = thought.text?.startsWith('> ') ? thought.text.slice(2) : thought.text;
@@ -142,12 +221,18 @@ function AssistantMessage({ thought, onActionConfirm, onActionCancel }) {
       </div>
     );
   }
-  // result — show only payload, no reasoning or badge
+  // result — detect historical action card vs normal text
+  const payload = thought.payload || '';
+  const isHistoricalAction = /^\[Proposed (SEND_EMAIL|SAVE_FILE)/.test(payload)
+                          || /^\[Generated image:/.test(payload);
   return (
     <div className="um-row um-row-assistant">
       <div className="um-avatar"><SparkleIcon /></div>
       <div className="um-bubble um-bubble-assistant">
-        <div className="um-payload">{thought.payload}</div>
+        {isHistoricalAction
+          ? <HistoricalActionCard content={payload} />
+          : <MarkdownText text={payload} />
+        }
       </div>
     </div>
   );
