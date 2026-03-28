@@ -22,11 +22,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import json as _json
+
 from agent import run_agent_stream
 from email_sender import send_email
 from window_context import get_active_window_title
 from rag.indexer import index_local_data
 from rag.searcher import search_docs
+import chats as chats_store
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -90,8 +93,9 @@ class HistoryMessage(BaseModel):
     content: str
 
 class AgentRequest(BaseModel):
-    query:   str = Field(..., min_length=1, max_length=2000)
-    history: list[HistoryMessage] = Field(default_factory=list)
+    query:           str = Field(..., min_length=1, max_length=2000)
+    history:         list[HistoryMessage] = Field(default_factory=list)
+    conversation_id: str | None = Field(None)
 
 class SaveFileRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255)
@@ -182,20 +186,62 @@ async def save_file(body: SaveFileRequest):
 
 @app.post("/agent/run")
 async def agent_run(body: AgentRequest):
-    """
-    Full Copilot agent pipeline streamed as Server-Sent Events.
+    """Full Copilot agent pipeline streamed as Server-Sent Events."""
+    conv_id = body.conversation_id
+    history = [{"role": m.role, "content": m.content} for m in body.history]
 
-    Each event: data: {"step": "context"|"search"|"think"|"result"|"error", ...}\n\n
+    async def event_gen():
+        assistant_content = ""
+        try:
+            async for chunk in run_agent_stream(body.query, history):
+                # Intercept final events to capture the assistant's reply for storage
+                if chunk.startswith("data: "):
+                    try:
+                        ev = _json.loads(chunk[6:].strip())
+                        step = ev.get("step")
+                        if step == "result":
+                            assistant_content = str(ev.get("payload", ""))
+                        elif step == "image":
+                            assistant_content = f"[Generated image: \"{(ev.get('prompt') or '')[:100]}\". Saved and can be attached to emails.]"
+                        elif step == "action_card":
+                            pl = ev.get("payload", {})
+                            assistant_content = f"[Proposed {ev.get('action')}: {_json.dumps(pl)}]"
+                    except Exception:
+                        pass
+                yield chunk
+        finally:
+            # Persist messages to disk after stream completes
+            if conv_id and assistant_content:
+                chats_store.append_messages(conv_id, [
+                    {"role": "user",      "content": body.query},
+                    {"role": "assistant", "content": assistant_content},
+                ])
 
-    The final 'result' event contains:
-      {"step": "result", "thought": str, "action": str, "payload": str}
-    """
     return StreamingResponse(
-        run_agent_stream(body.query, [{"role": m.role, "content": m.content} for m in body.history]),
+        event_gen(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )
+
+
+# ── Chat management ───────────────────────────────────────────────────────────
+
+@app.get("/chats")
+async def list_chats():
+    return chats_store.list_chats()
+
+@app.post("/chats")
+async def create_chat():
+    return chats_store.create_chat()
+
+@app.get("/chats/{chat_id}")
+async def get_chat(chat_id: str):
+    chat = chats_store.get_chat(chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+@app.delete("/chats/{chat_id}")
+async def delete_chat(chat_id: str):
+    chats_store.delete_chat(chat_id)
+    return {"ok": True}

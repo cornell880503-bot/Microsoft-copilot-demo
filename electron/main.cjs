@@ -51,10 +51,10 @@ function createWindow() {
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
 
   mainWindow = new BrowserWindow({
-    width: 600,
-    height: 480,           // slightly taller for image / action cards
-    x: Math.round((sw - 600) / 2),
-    y: Math.round((sh - 480) / 2),
+    width: 860,
+    height: 560,
+    x: Math.round((sw - 860) / 2),
+    y: Math.round((sh - 560) / 2),
     frame: false,
     transparent: true,
     resizable: false,
@@ -84,7 +84,7 @@ function createWindow() {
 function showWindow() {
   if (!mainWindow) return;
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  mainWindow.setPosition(Math.round((sw - 600) / 2), Math.round((sh - 480) / 2));
+  mainWindow.setPosition(Math.round((sw - 860) / 2), Math.round((sh - 560) / 2));
   mainWindow.show();
   mainWindow.focus();
   isVisible = true;

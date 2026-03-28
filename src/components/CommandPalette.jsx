@@ -1,60 +1,219 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import SearchInput from './SearchInput';
 import AgentThoughts from './AgentThoughts';
 
 const SIDECAR = 'http://127.0.0.1:8765';
 
-const INITIAL_THOUGHTS = [
-  { id: 1, type: 'info',    text: 'Copilot initialized. Awaiting command...' },
-  { id: 2, type: 'success', text: 'Local knowledge base ready.' },
-  { id: 3, type: 'info',    text: 'Type a query and press Enter to begin.' },
-];
-
-function CopilotIcon() {
+/* ─── Helpers ───────────────────────────────────────────────────────────────── */
+function CopilotIcon({ size = 18 }) {
   return (
-    <svg className="copilot-icon" viewBox="0 0 20 20" fill="none">
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
       <defs>
-        <linearGradient id="cg" x1="0" y1="0" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+        <linearGradient id="cg-cp" x1="0" y1="0" x2="20" y2="20" gradientUnits="userSpaceOnUse">
           <stop offset="0%"   stopColor="#0F6CBD" />
           <stop offset="50%"  stopColor="#8661C5" />
           <stop offset="100%" stopColor="#C239B3" />
         </linearGradient>
       </defs>
-      <path d="M10 2C10 2 13.5 5 18 5C18 5 15 8.5 18 13C18 13 13.5 12 10 18C10 18 6.5 12 2 13C2 13 5 8.5 2 5C2 5 6.5 5 10 2Z" fill="url(#cg)" opacity="0.92" />
+      <path d="M10 2C10 2 13.5 5 18 5C18 5 15 8.5 18 13C18 13 13.5 12 10 18C10 18 6.5 12 2 13C2 13 5 8.5 2 5C2 5 6.5 5 10 2Z" fill="url(#cg-cp)" opacity="0.92" />
     </svg>
   );
 }
 
-let _id = 10;
-const nextId = () => ++_id;
+function formatDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = (now - d) / 1000;
+    if (diff < 60)           return 'Just now';
+    if (diff < 3600)         return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400)        return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 86400 * 7)   return `${Math.floor(diff / 86400)}d ago`;
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch { return ''; }
+}
+
+/** Convert stored messages → thought entries for display */
+function messagesToThoughts(messages) {
+  let id = 1000;
+  return messages.map((m) => {
+    const base = { id: id++ };
+    if (m.role === 'user') {
+      return { ...base, type: 'user', text: `> ${m.content}` };
+    }
+    // Assistant: detect special prefixes
+    const c = m.content;
+    if (c.startsWith('[Generated image:')) {
+      return { ...base, type: 'result', thought: null, action: 'GENERATE_IMAGE', payload: c };
+    }
+    if (c.startsWith('[Proposed SEND_EMAIL:') || c.startsWith('[Proposed SAVE_FILE:')) {
+      return { ...base, type: 'result', thought: null, action: 'DRAFT_CONTENT', payload: c };
+    }
+    return { ...base, type: 'result', thought: null, action: 'DRAFT_CONTENT', payload: c };
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SIDEBAR
+   ══════════════════════════════════════════════════════════════ */
+function Sidebar({ chats, activeChatId, onNewChat, onSelectChat, onDeleteChat }) {
+  return (
+    <div className="sidebar">
+      {/* Logo + New Chat button */}
+      <div className="sidebar-header">
+        <div className="sidebar-logo">
+          <CopilotIcon size={16} />
+          <span className="sidebar-logo-label">Copilot</span>
+        </div>
+        <button
+          className="new-chat-btn"
+          onClick={onNewChat}
+          title="New Chat"
+          aria-label="New Chat"
+        >
+          +
+        </button>
+      </div>
+
+      <div className="sidebar-divider" />
+
+      {/* Chat list */}
+      {chats.length === 0 ? (
+        <div className="sidebar-empty">
+          <CopilotIcon size={28} />
+          <span>No conversations yet</span>
+          <span style={{ fontSize: 10 }}>Press + to start</span>
+        </div>
+      ) : (
+        <div className="chat-list" role="listbox" aria-label="Conversations">
+          {chats.map((chat) => (
+            <button
+              key={chat.id}
+              className={`chat-item${activeChatId === chat.id ? ' active' : ''}`}
+              onClick={() => onSelectChat(chat.id)}
+              role="option"
+              aria-selected={activeChatId === chat.id}
+            >
+              <span className="chat-item-title">{chat.title}</span>
+              <span className="chat-item-date">{formatDate(chat.updated_at)}</span>
+              <button
+                className="chat-delete-btn"
+                onClick={(e) => { e.stopPropagation(); onDeleteChat(chat.id); }}
+                aria-label="Delete chat"
+                title="Delete"
+              >
+                ✕
+              </button>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MAIN EXPORT
+   ══════════════════════════════════════════════════════════════ */
+let _thoughtId = 10;
+const nextId = () => ++_thoughtId;
 
 export default function CommandPalette() {
-  const [query, setQuery]             = useState('');
-  const [thoughts, setThoughts]       = useState(INITIAL_THOUGHTS);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [displayMode, setDisplayMode]   = useState('user');
-  // Conversation history sent to the model for multi-turn context
-  const [history, setHistory]           = useState([]);
+  const [query, setQuery]                 = useState('');
+  const [thoughts, setThoughts]           = useState([]);
+  const [isProcessing, setIsProcessing]   = useState(false);
+  const [displayMode, setDisplayMode]     = useState('user');
+  const [history, setHistory]             = useState([]);
+  const [chats, setChats]                 = useState([]);
+  const [activeChatId, setActiveChatId]   = useState(null);
+  const [isLoadingChat, setIsLoadingChat] = useState(false);
 
-  const addThought = useCallback((thought) => {
-    setThoughts((prev) => [...prev, { id: nextId(), ...thought }]);
+  const addThought = useCallback((t) => {
+    setThoughts((prev) => [...prev, { id: nextId(), ...t }]);
   }, []);
 
+  // ── Load chat list ──────────────────────────────────────────
+  const refreshChatList = useCallback(async () => {
+    try {
+      const list = await fetch(`${SIDECAR}/chats`).then((r) => r.json());
+      setChats(list);
+    } catch (_) { /* sidecar not ready yet */ }
+  }, []);
+
+  useEffect(() => {
+    refreshChatList();
+  }, [refreshChatList]);
+
+  // ── Select / load a chat ────────────────────────────────────
+  const handleSelectChat = useCallback(async (chatId) => {
+    if (chatId === activeChatId) return;
+    setIsLoadingChat(true);
+    try {
+      const chat = await fetch(`${SIDECAR}/chats/${chatId}`).then((r) => r.json());
+      setActiveChatId(chatId);
+      setHistory(chat.messages.map((m) => ({ role: m.role, content: m.content })));
+      setThoughts(messagesToThoughts(chat.messages));
+    } catch (err) {
+      console.error('Failed to load chat:', err);
+    } finally {
+      setIsLoadingChat(false);
+    }
+  }, [activeChatId]);
+
+  // ── New chat ────────────────────────────────────────────────
+  const handleNewChat = useCallback(async () => {
+    try {
+      const chat = await fetch(`${SIDECAR}/chats`, { method: 'POST' }).then((r) => r.json());
+      setChats((prev) => [{ id: chat.id, title: chat.title, updated_at: chat.updated_at }, ...prev]);
+      setActiveChatId(chat.id);
+      setHistory([]);
+      setThoughts([]);
+    } catch (err) {
+      console.error('Failed to create chat:', err);
+    }
+  }, []);
+
+  // ── Delete chat ─────────────────────────────────────────────
+  const handleDeleteChat = useCallback(async (chatId) => {
+    await fetch(`${SIDECAR}/chats/${chatId}`, { method: 'DELETE' }).catch(() => {});
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
+    if (activeChatId === chatId) {
+      setActiveChatId(null);
+      setThoughts([]);
+      setHistory([]);
+    }
+  }, [activeChatId]);
+
+  // ── Submit query ────────────────────────────────────────────
   const handleSubmit = useCallback(async (value) => {
     if (!value.trim() || isProcessing) return;
+
+    // Auto-create a chat if none is active
+    let chatId = activeChatId;
+    if (!chatId) {
+      try {
+        const chat = await fetch(`${SIDECAR}/chats`, { method: 'POST' }).then((r) => r.json());
+        chatId = chat.id;
+        setActiveChatId(chatId);
+        setChats((prev) => [{ id: chat.id, title: chat.title, updated_at: chat.updated_at }, ...prev]);
+      } catch (err) {
+        console.error('Failed to create chat:', err);
+        return;
+      }
+    }
 
     addThought({ type: 'user', text: `> ${value}` });
     setQuery('');
     setIsProcessing(true);
 
-    // Capture what the assistant does this turn for history
     let assistantSummary = '';
 
     try {
       const response = await fetch(`${SIDECAR}/agent/run`, {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: value, history }),
+        body:    JSON.stringify({ query: value, history, conversation_id: chatId }),
       });
 
       if (!response.ok) throw new Error(`Sidecar error: ${response.status}`);
@@ -83,7 +242,7 @@ export default function CommandPalette() {
             assistantSummary = String(payload || '');
           } else if (step === 'image') {
             addThought({ type: 'image', thought, action, image_data, prompt });
-            assistantSummary = `[Generated image with prompt: "${(prompt || '').slice(0, 120)}". The image is saved and can be attached to an email if you ask.]`;
+            assistantSummary = `[Generated image: "${(prompt || '').slice(0, 120)}". The image is saved and can be attached to an email.]`;
           } else if (step === 'action_card') {
             addThought({ type: 'action_card', thought, action, payload });
             const summary = typeof payload === 'object' ? JSON.stringify(payload) : String(payload);
@@ -104,19 +263,21 @@ export default function CommandPalette() {
       });
     } finally {
       setIsProcessing(false);
-      // Append this Q&A to conversation history (keep last 20 messages = 10 turns)
       if (assistantSummary) {
-        setHistory(prev => [
-          ...prev,
+        const newHistory = [
+          ...history,
           { role: 'user',      content: value },
           { role: 'assistant', content: assistantSummary },
-        ].slice(-20));
+        ].slice(-20);
+        setHistory(newHistory);
+        // Refresh sidebar to show updated title
+        refreshChatList();
       }
     }
-  }, [isProcessing, addThought, history]);
+  }, [isProcessing, addThought, history, activeChatId, refreshChatList]);
 
-  const handleActionConfirm = useCallback((action, fields) => {
-    addThought({ type: 'success', text: `✓ ${action} confirmed — synced to Office workflow` });
+  const handleActionConfirm = useCallback(() => {
+    addThought({ type: 'success', text: '✓ Action confirmed' });
   }, [addThought]);
 
   const handleActionCancel = useCallback(() => {
@@ -125,55 +286,75 @@ export default function CommandPalette() {
 
   return (
     <div className="palette-shell">
-      <div className="drag-region" />
-
-      <div className="palette-header">
-        <div className="copilot-badge">
-          <CopilotIcon />
-          <span className="copilot-label">Copilot</span>
-        </div>
-
-        <div className="mode-toggle" role="group" aria-label="Display mode">
-          <button
-            className={`mode-toggle-btn${displayMode === 'user' ? ' mode-toggle-active' : ''}`}
-            onClick={() => setDisplayMode('user')}
-          >
-            User
-          </button>
-          <button
-            className={`mode-toggle-btn${displayMode === 'demo' ? ' mode-toggle-active' : ''}`}
-            onClick={() => setDisplayMode('demo')}
-          >
-            Demo
-          </button>
-        </div>
-
-        <button className="close-btn" onClick={() => window.orion?.hideWindow()} aria-label="Close">
-          ✕
-        </button>
-      </div>
-
-      <SearchInput
-        value={query}
-        onChange={setQuery}
-        onSubmit={handleSubmit}
-        isProcessing={isProcessing}
+      {/* ── Sidebar ── */}
+      <Sidebar
+        chats={chats}
+        activeChatId={activeChatId}
+        onNewChat={handleNewChat}
+        onSelectChat={handleSelectChat}
+        onDeleteChat={handleDeleteChat}
       />
 
-      <div className="palette-divider" />
+      {/* ── Main area ── */}
+      <div className="main-area">
+        {/* Header */}
+        <div className="drag-region" />
+        <div className="palette-header">
+          <div className="mode-toggle" role="group" aria-label="Display mode">
+            <button
+              className={`mode-toggle-btn${displayMode === 'user' ? ' mode-toggle-active' : ''}`}
+              onClick={() => setDisplayMode('user')}
+            >User</button>
+            <button
+              className={`mode-toggle-btn${displayMode === 'demo' ? ' mode-toggle-active' : ''}`}
+              onClick={() => setDisplayMode('demo')}
+            >Demo</button>
+          </div>
+          <button className="close-btn" onClick={() => window.orion?.hideWindow()} aria-label="Close">✕</button>
+        </div>
 
-      <AgentThoughts
-        thoughts={thoughts}
-        isProcessing={isProcessing}
-        onActionConfirm={handleActionConfirm}
-        onActionCancel={handleActionCancel}
-        displayMode={displayMode}
-      />
+        {/* Chat content or empty state */}
+        {activeChatId || thoughts.length > 0 ? (
+          isLoadingChat ? (
+            <div className="empty-state">
+              <div className="typing-dots"><span /><span /><span /></div>
+            </div>
+          ) : (
+            <AgentThoughts
+              thoughts={thoughts}
+              isProcessing={isProcessing}
+              onActionConfirm={handleActionConfirm}
+              onActionCancel={handleActionCancel}
+              displayMode={displayMode}
+            />
+          )
+        ) : (
+          <div className="empty-state">
+            <div className="empty-state-icon"><CopilotIcon size={36} /></div>
+            <div className="empty-state-title">How can I help you?</div>
+            <div className="empty-state-sub">
+              Ask anything — I can search your files, draft content,<br />
+              generate images, and take actions.
+            </div>
+          </div>
+        )}
 
-      <div className="palette-footer">
-        <span>↵ Send</span>
-        <span>Esc Dismiss</span>
-        <span>⌥ Space Toggle</span>
+        <div className="palette-divider" />
+
+        {/* Input */}
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          onSubmit={handleSubmit}
+          isProcessing={isProcessing}
+        />
+
+        {/* Footer */}
+        <div className="palette-footer">
+          <span>↵ Send</span>
+          <span>Esc Dismiss</span>
+          <span>⌥ Space Toggle</span>
+        </div>
       </div>
     </div>
   );
