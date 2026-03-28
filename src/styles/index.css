@@ -27,63 +27,49 @@ html, body, #root {
   background: transparent;
 }
 
-/* ─── Palette Shell — Mica/Glass Effect ────────────────────────────────────── */
-/*
- * Windows 11 Mica: The BrowserWindow uses backgroundMaterial: 'mica' in main.js.
- * The CSS layer adds the acrylic/frosted glass layered on top for cross-platform
- * visual consistency and to render UI chrome over the system material.
- */
+/* ─── Palette Shell — Microsoft Copilot Light Acrylic ───────────────────────── */
 .palette-shell {
   width: 600px;
   height: 400px;
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
   position: relative;
 
-  /* Frosted glass base — shows through Mica on Win11, renders standalone on others */
-  background: rgba(20, 20, 30, 0.55);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  /* Bright frosted glass — light acrylic */
+  background: rgba(249, 250, 252, 0.82);
+  backdrop-filter: blur(48px) saturate(160%) brightness(1.08);
+  -webkit-backdrop-filter: blur(48px) saturate(160%) brightness(1.08);
 
-  /* Subtle luminous border */
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  /* Fluent Design border */
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-bottom-color: rgba(200, 210, 230, 0.6);
 
-  /* Layered shadow for depth */
+  /* Elevation shadow — Fluent depth */
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.35),
-    0 8px 32px rgba(0, 0, 0, 0.55),
-    0 2px 8px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-
-  /* Mica-style noise texture overlay */
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E"),
-    linear-gradient(
-      160deg,
-      rgba(100, 120, 255, 0.06) 0%,
-      rgba(180, 100, 255, 0.04) 50%,
-      rgba(60, 180, 255, 0.06) 100%
-    );
+    0 0 0 1px rgba(0, 100, 200, 0.08),
+    0 8px 40px rgba(0, 80, 180, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
-/* Subtle top-edge highlight (simulates light from above) */
+/* Top gradient accent bar — Copilot brand gradient */
 .palette-shell::before {
   content: '';
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
-  pointer-events: none;
+  height: 3px;
+  background: linear-gradient(90deg, #0F6CBD 0%, #8661C5 50%, #C239B3 100%);
   z-index: 10;
+  border-radius: 14px 14px 0 0;
 }
 
 /* ─── Drag Region ───────────────────────────────────────────────────────────── */
 .drag-region {
-  height: 8px;
+  height: 12px;
   width: 100%;
   -webkit-app-region: drag;
   flex-shrink: 0;
@@ -94,59 +80,54 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px 8px 16px;
+  padding: 2px 16px 10px 16px;
   flex-shrink: 0;
   -webkit-app-region: drag;
 }
 
-.orion-badge {
+.copilot-badge {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   -webkit-app-region: no-drag;
 }
 
-.orion-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #60a5fa, #a78bfa);
-  box-shadow: 0 0 6px rgba(167, 139, 250, 0.7);
-  animation: pulse-dot 2.5s ease-in-out infinite;
+/* Copilot sparkle icon (SVG inline) */
+.copilot-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.7; transform: scale(1.2); }
-}
-
-.orion-label {
-  font-size: 11px;
+.copilot-label {
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.01em;
+  background: linear-gradient(90deg, #0F6CBD, #8661C5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .close-btn {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: 6px;
   border: none;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.35);
-  font-size: 9px;
+  background: transparent;
+  color: #8a9ab0;
+  font-size: 10px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   -webkit-app-region: no-drag;
 }
 
 .close-btn:hover {
-  background: rgba(248, 113, 113, 0.25);
-  color: #f87171;
+  background: rgba(209, 52, 56, 0.1);
+  color: #d13438;
 }
 
 /* ─── Search Input ───────────────────────────────────────────────────────────── */
@@ -156,20 +137,21 @@ html, body, #root {
   align-items: center;
   margin: 0 14px;
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1.5px solid rgba(200, 214, 235, 0.8);
+  border-radius: 10px;
   transition: border-color 0.2s, box-shadow 0.2s;
+  box-shadow: 0 1px 4px rgba(0, 80, 180, 0.06);
 }
 
 .search-wrapper:focus-within {
-  border-color: rgba(167, 139, 250, 0.5);
-  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.12), 0 0 12px rgba(167, 139, 250, 0.1);
+  border-color: #0F6CBD;
+  box-shadow: 0 0 0 3px rgba(15, 108, 189, 0.12), 0 1px 4px rgba(0, 80, 180, 0.1);
 }
 
 .search-icon {
   padding: 0 12px;
-  color: rgba(255, 255, 255, 0.35);
+  color: #0F6CBD;
   display: flex;
   align-items: center;
   flex-shrink: 0;
@@ -180,16 +162,16 @@ html, body, #root {
   background: transparent;
   border: none;
   outline: none;
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 15px;
+  color: #1a1a2e;
+  font-size: 14px;
   font-weight: 400;
   font-family: inherit;
   padding: 11px 0;
-  caret-color: #a78bfa;
+  caret-color: #0F6CBD;
 }
 
 .search-input::placeholder {
-  color: rgba(255, 255, 255, 0.28);
+  color: #9ba8bb;
 }
 
 .search-input:disabled {
@@ -201,21 +183,21 @@ html, body, #root {
   padding: 0 12px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.3);
+  color: #9ba8bb;
   font-size: 10px;
   cursor: pointer;
   transition: color 0.15s;
 }
 
 .search-clear:hover {
-  color: rgba(255, 255, 255, 0.65);
+  color: #505d70;
 }
 
 /* ─── Divider ────────────────────────────────────────────────────────────────── */
 .palette-divider {
   height: 1px;
   margin: 10px 14px 0 14px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent);
+  background: linear-gradient(90deg, transparent, rgba(0, 80, 180, 0.1), transparent);
   flex-shrink: 0;
 }
 
@@ -226,10 +208,9 @@ html, body, #root {
   padding: 8px 14px 4px 14px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  /* Custom scrollbar */
+  gap: 2px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.12) transparent;
+  scrollbar-color: rgba(0, 100, 200, 0.15) transparent;
 }
 
 .thoughts-container::-webkit-scrollbar {
@@ -241,7 +222,7 @@ html, body, #root {
 }
 
 .thoughts-container::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 100, 200, 0.15);
   border-radius: 2px;
 }
 
@@ -249,41 +230,47 @@ html, body, #root {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 3px 0;
-  animation: thought-in 0.2s ease-out both;
+  padding: 3px 6px;
+  border-radius: 6px;
+  animation: thought-in 0.18s ease-out both;
+  transition: background 0.1s;
+}
+
+.thought-entry:hover {
+  background: rgba(0, 80, 180, 0.04);
 }
 
 @keyframes thought-in {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(3px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 .thought-bar {
   width: 2px;
-  height: 14px;
+  height: 13px;
   border-radius: 1px;
   flex-shrink: 0;
-  margin-top: 1px;
+  margin-top: 2px;
 }
 
 .thought-tag {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   width: 28px;
   flex-shrink: 0;
-  opacity: 0.85;
+  opacity: 0.9;
 }
 
 .thought-text {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.65);
-  line-height: 1.5;
+  color: #3a4558;
+  line-height: 1.55;
   font-family: 'Cascadia Code', 'Consolas', monospace;
 }
 
 .thought-entry.thought-typing .thought-text {
-  color: rgba(255, 255, 255, 0.4);
+  color: #8a9ab0;
 }
 
 /* Typing indicator dots */
@@ -298,7 +285,7 @@ html, body, #root {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: rgba(167, 139, 250, 0.6);
+  background: #8661C5;
   animation: dot-bounce 1.2s ease-in-out infinite;
 }
 
@@ -306,7 +293,7 @@ html, body, #root {
 .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
 
 @keyframes dot-bounce {
-  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
   40%           { transform: translateY(-5px); opacity: 1; }
 }
 
@@ -316,20 +303,22 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   gap: 20px;
-  padding: 8px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 7px 16px;
+  background: rgba(240, 244, 250, 0.7);
+  border-top: 1px solid rgba(200, 214, 235, 0.5);
   flex-shrink: 0;
 }
 
 .palette-footer span {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.22);
-  letter-spacing: 0.04em;
+  color: #9ba8bb;
+  letter-spacing: 0.03em;
 }
 
 /* ─── Spinner ────────────────────────────────────────────────────────────────── */
 .spin {
   animation: spin 0.8s linear infinite;
+  color: #0F6CBD;
 }
 
 @keyframes spin {

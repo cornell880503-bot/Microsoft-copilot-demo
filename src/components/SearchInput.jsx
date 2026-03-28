@@ -3,15 +3,12 @@ import React, { useRef, useEffect } from 'react';
 export default function SearchInput({ value, onChange, onSubmit, isProcessing }) {
   const inputRef = useRef(null);
 
-  // Auto-focus when rendered
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      onSubmit(value);
-    }
+    if (e.key === 'Enter') onSubmit(value);
   };
 
   return (
@@ -32,7 +29,7 @@ export default function SearchInput({ value, onChange, onSubmit, isProcessing })
         ref={inputRef}
         type="text"
         className="search-input"
-        placeholder="Ask Orion anything..."
+        placeholder="Ask Copilot anything..."
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -41,11 +38,7 @@ export default function SearchInput({ value, onChange, onSubmit, isProcessing })
         spellCheck="false"
       />
       {value && (
-        <button
-          className="search-clear"
-          onClick={() => onChange('')}
-          aria-label="Clear"
-        >
+        <button className="search-clear" onClick={() => onChange('')} aria-label="Clear">
           ✕
         </button>
       )}
