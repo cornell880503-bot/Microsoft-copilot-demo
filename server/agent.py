@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import AsyncGenerator
 
 from google import genai
@@ -72,6 +73,25 @@ Create an enhanced, detailed image generation prompt that:
 
 Respond with ONLY the enhanced prompt text, no explanation.
 """
+
+
+def _find_cv_in_rag(rag_results: list[dict]) -> str | None:
+    """
+    Scan RAG result sources for a PDF whose filename suggests it's a CV/resume.
+    Returns the absolute path of the best match, or None.
+    """
+    cv_keywords = {"cv", "resume", "curriculum"}
+    candidates = []
+    for r in rag_results:
+        src = r.get("source", "")
+        name = Path(src).name.lower()
+        if src.endswith(".pdf") and any(kw in name for kw in cv_keywords):
+            candidates.append((r["score"], src))
+    if not candidates:
+        return None
+    # Return the path with the highest relevance score
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
 
 
 def _sse(data: dict) -> str:
@@ -232,6 +252,17 @@ async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
                 action_payload = json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
             except (json.JSONDecodeError, TypeError):
                 action_payload = {"content": result["payload"]}
+
+            # Auto-attach: if SEND_EMAIL has no attachment_path but the user
+            # mentioned CV/resume, find the best PDF from RAG results
+            if action == "SEND_EMAIL" and not action_payload.get("attachment_path"):
+                cv_keywords = {"cv", "resume", "curriculum vitae"}
+                if any(kw in user_input.lower() for kw in cv_keywords):
+                    pdf_path = _find_cv_in_rag(rag_results)
+                    if pdf_path:
+                        action_payload["attachment_path"] = pdf_path
+                        yield _sse({"step": "search", "text": f"Auto-attaching CV: {Path(pdf_path).name}"})
+
             yield _sse({
                 "step": "action_card",
                 "thought": result["thought"],
