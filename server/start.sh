@@ -45,6 +45,14 @@ fi
 
 source .venv/bin/activate
 
+# ── Tesseract OCR (required for PNG/JPG indexing) ─────────────────────────────
+if ! command -v tesseract &>/dev/null; then
+  echo ""
+  echo "Note: Tesseract not found — PNG/JPG files will be skipped."
+  echo "      To enable image OCR: brew install tesseract"
+  echo ""
+fi
+
 # ── Install dependencies ──────────────────────────────────────────────────────
 echo "Installing dependencies (first run downloads ~300MB of ML models)..."
 pip install -q -r requirements.txt

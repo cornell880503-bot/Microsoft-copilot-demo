@@ -11,6 +11,11 @@ langchain-huggingface
 chromadb
 sentence-transformers
 
+# Document parsing
+pypdf
+pytesseract
+Pillow
+
 # Gemini
 google-genai
 
