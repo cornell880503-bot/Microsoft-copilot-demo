@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -56,7 +57,8 @@ Action selection rules:
 - SAVE_FILE         → user wants to save content to a file on their computer
 
 For SEND_EMAIL, structure payload as JSON string:
-{"to":"...","subject":"...","body":"...","attachment_path":"<absolute path to file if user mentioned attaching one, else null>"}
+{"to":"...","subject":"...","body":"...","attachment_path":null}
+IMPORTANT for body: write the email body FROM the user's perspective, addressed TO the recipient — as if the user is sending it. Do NOT write a response back to the user. Do NOT ask for clarification. Write a complete, professional email ready to send.
 For SAVE_FILE, structure payload as JSON string: {"filename":"...","content":"..."}
 
 Tailor your tone to the active application context.
@@ -73,6 +75,9 @@ Create an enhanced, detailed image generation prompt that:
 
 Respond with ONLY the enhanced prompt text, no explanation.
 """
+
+
+_LAST_IMAGE_PATH = Path(tempfile.gettempdir()) / "copilot_last_image.png"
 
 
 def _find_cv_file() -> str | None:
@@ -171,7 +176,10 @@ async def _generate_image(
         )
         for part in img_response.candidates[0].content.parts:
             if part.inline_data and part.inline_data.mime_type.startswith("image/"):
-                b64 = base64.b64encode(part.inline_data.data).decode("utf-8")
+                raw_bytes = part.inline_data.data
+                _LAST_IMAGE_PATH.write_bytes(raw_bytes)
+                logger.info("Saved generated image to %s", _LAST_IMAGE_PATH)
+                b64 = base64.b64encode(raw_bytes).decode("utf-8")
                 mime = part.inline_data.mime_type
                 return f"data:{mime};base64,{b64}", augmented
     except Exception as e:
@@ -187,7 +195,10 @@ async def _generate_image(
             )
             for part in img_response.candidates[0].content.parts:
                 if part.inline_data and part.inline_data.mime_type.startswith("image/"):
-                    b64 = base64.b64encode(part.inline_data.data).decode("utf-8")
+                    raw_bytes = part.inline_data.data
+                    _LAST_IMAGE_PATH.write_bytes(raw_bytes)
+                    logger.info("Saved generated image to %s", _LAST_IMAGE_PATH)
+                    b64 = base64.b64encode(raw_bytes).decode("utf-8")
                     mime = part.inline_data.mime_type
                     return f"data:{mime};base64,{b64}", augmented
         except Exception as e2:
@@ -270,11 +281,24 @@ async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
             except (json.JSONDecodeError, TypeError):
                 action_payload = {"content": result["payload"]}
 
-            # Auto-attach: always override attachment_path for CV emails
-            # (don't trust Gemini-hallucinated paths from RAG context)
+            # Auto-attach logic for SEND_EMAIL
             if action == "SEND_EMAIL":
-                cv_keywords = {"cv", "resume", "curriculum vitae"}
-                if any(kw in user_input.lower() for kw in cv_keywords):
+                query = user_input.lower()
+
+                # 1. Image attachment: if user mentions "this image / the image / the photo"
+                image_keywords = {"this image", "the image", "this photo", "the photo",
+                                   "this picture", "the picture", "this figure", "這張圖",
+                                   "this chart", "the chart"}
+                if any(kw in query for kw in image_keywords):
+                    if _LAST_IMAGE_PATH.exists():
+                        action_payload["attachment_path"] = str(_LAST_IMAGE_PATH)
+                        logger.info("Auto-attaching last generated image: %s", _LAST_IMAGE_PATH)
+                        yield _sse({"step": "search", "text": "Auto-attaching last generated image"})
+                    else:
+                        logger.warning("User mentioned image but no generated image found on disk")
+
+                # 2. CV attachment: filesystem scan for resume PDFs
+                elif any(kw in query for kw in {"cv", "resume", "curriculum vitae"}):
                     logger.info("CV email detected; action_payload attachment_path=%r", action_payload.get("attachment_path"))
                     pdf_path = _find_cv_file()
                     if pdf_path:
@@ -283,6 +307,10 @@ async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
                         yield _sse({"step": "search", "text": f"Auto-attaching CV: {Path(pdf_path).name}"})
                     else:
                         logger.warning("No CV file found on filesystem")
+
+                # 3. Always clear any hallucinated path from Gemini
+                elif not action_payload.get("attachment_path") or not Path(str(action_payload.get("attachment_path", ""))).exists():
+                    action_payload["attachment_path"] = None
 
             yield _sse({
                 "step": "action_card",
