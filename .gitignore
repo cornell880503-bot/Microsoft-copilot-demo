@@ -4,3 +4,5 @@ release/
 .env
 .env.local
 *.log
+server/.venv/
+server/chroma_store/

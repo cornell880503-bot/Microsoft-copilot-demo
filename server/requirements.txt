@@ -1,0 +1,15 @@
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-dotenv==1.0.1
+
+# RAG stack
+langchain==0.2.5
+langchain-community==0.2.5
+langchain-text-splitters==0.2.2
+langchain-chroma==0.1.2
+chromadb==0.5.3
+sentence-transformers==3.0.1
+
+# Windows-only (install manually on Windows): pywin32
+# pip install pywin32
+# On macOS/Linux the active-window endpoint uses platform-native fallbacks

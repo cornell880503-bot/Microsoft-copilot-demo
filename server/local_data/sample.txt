@@ -1,0 +1,40 @@
+Project Copilot — Knowledge Base Sample
+========================================
+
+Project Copilot is an AI-powered command palette built with Electron and React.
+It runs as a frameless overlay window toggled by Alt+Space (Option+Space on macOS).
+
+Architecture Overview
+---------------------
+The system consists of two main components:
+1. Electron Shell — a React frontend with a Copilot-style Fluent Design UI
+2. Python Sidecar — a FastAPI server providing system context and RAG capabilities
+
+The Python sidecar runs on http://localhost:8765 and exposes REST endpoints
+that the Electron renderer can call via the preload context bridge.
+
+RAG System
+----------
+The Retrieval Augmented Generation (RAG) layer uses:
+- LangChain for document loading and orchestration
+- ChromaDB as the local vector store (persisted to ./chroma_store)
+- sentence-transformers (all-MiniLM-L6-v2) for local embeddings — no API key required
+
+Documents are chunked into 500-character segments with 50-character overlap
+to preserve context across chunk boundaries.
+
+Window Context
+--------------
+The /get-active-window endpoint detects the user's foreground application:
+- Windows: win32gui from pywin32
+- macOS: AppleScript via osascript subprocess
+- Linux: xdotool subprocess
+
+This context can be injected into LLM prompts to make responses aware of
+what the user is currently working on.
+
+Keyboard Shortcuts
+------------------
+- Alt+Space (⌥ Space on macOS): Toggle the Copilot overlay
+- Escape: Hide the overlay
+- Enter: Submit a query

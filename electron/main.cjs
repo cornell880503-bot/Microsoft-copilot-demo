@@ -1,30 +1,73 @@
 const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
+const { spawn } = require('child_process');
 const path = require('path');
+const fs   = require('fs');
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
-let mainWindow = null;
-let isVisible = false;
+let mainWindow  = null;
+let isVisible   = false;
+let sidecarProc = null;
+
+// ── Python Sidecar ────────────────────────────────────────────────────────────
+
+function startSidecar() {
+  const serverDir = isDev
+    ? path.join(__dirname, '../server')
+    : path.join(process.resourcesPath, 'server');
+
+  // Prefer .venv inside /server, fall back to system python3 / python
+  const venvPython = path.join(serverDir, '.venv', 'bin', 'python');
+  const python = fs.existsSync(venvPython)
+    ? venvPython
+    : (process.platform === 'win32' ? 'python' : 'python3');
+
+  console.log(`[sidecar] Starting with: ${python}`);
+
+  sidecarProc = spawn(
+    python,
+    ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '8765', '--no-access-log'],
+    {
+      cwd: serverDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    }
+  );
+
+  sidecarProc.stdout.on('data', (d) => process.stdout.write(`[sidecar] ${d}`));
+  sidecarProc.stderr.on('data', (d) => process.stderr.write(`[sidecar] ${d}`));
+
+  sidecarProc.on('exit', (code) => {
+    console.log(`[sidecar] Exited with code ${code}`);
+    sidecarProc = null;
+  });
+}
+
+function stopSidecar() {
+  if (sidecarProc) {
+    sidecarProc.kill();
+    sidecarProc = null;
+  }
+}
+
+// ── Window ────────────────────────────────────────────────────────────────────
 
 function createWindow() {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
 
-  const windowWidth = 600;
-  const windowHeight = 400;
-
   mainWindow = new BrowserWindow({
-    width: windowWidth,
-    height: windowHeight,
-    x: Math.round((screenWidth - windowWidth) / 2),
-    y: Math.round((screenHeight - windowHeight) / 2),
+    width: 600,
+    height: 400,
+    x: Math.round((screenWidth - 600) / 2),
+    y: Math.round((screenHeight - 400) / 2),
     frame: false,
     transparent: true,
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
     show: false,
-    vibrancy: 'fullscreen-ui',          // macOS fallback
-    backgroundMaterial: 'mica',          // Windows 11 Mica effect (Electron 28+)
+    vibrancy: 'fullscreen-ui',       // macOS
+    backgroundMaterial: 'mica',      // Windows 11
     backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -33,36 +76,20 @@ function createWindow() {
     },
   });
 
-  // Windows 11: enable Mica via DWM (requires Electron 28+ with backgroundMaterial)
-  if (process.platform === 'win32') {
-    mainWindow.setBackgroundColor('#00000000');
-  }
-
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
-  // Hide instead of close when clicking away
-  mainWindow.on('blur', () => {
-    if (isVisible) {
-      hideWindow();
-    }
-  });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+  mainWindow.on('blur',   () => { if (isVisible) hideWindow(); });
+  mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 function showWindow() {
   if (!mainWindow) return;
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  mainWindow.setPosition(
-    Math.round((sw - 600) / 2),
-    Math.round((sh - 400) / 2)
-  );
+  mainWindow.setPosition(Math.round((sw - 600) / 2), Math.round((sh - 400) / 2));
   mainWindow.show();
   mainWindow.focus();
   isVisible = true;
@@ -75,41 +102,30 @@ function hideWindow() {
 }
 
 function toggleWindow() {
-  if (isVisible) {
-    hideWindow();
-  } else {
-    showWindow();
-  }
+  isVisible ? hideWindow() : showWindow();
 }
 
+// ── App Lifecycle ─────────────────────────────────────────────────────────────
+
 app.whenReady().then(() => {
+  startSidecar();
   createWindow();
 
-  // Register global Alt+Space hotkey
   const registered = globalShortcut.register('Alt+Space', toggleWindow);
-  if (!registered) {
-    console.error('Failed to register Alt+Space global shortcut');
-  }
+  if (!registered) console.error('[electron] Failed to register Alt+Space');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-// IPC handlers for renderer process
-ipcMain.on('hide-window', hideWindow);
-ipcMain.on('show-window', showWindow);
-
-ipcMain.handle('get-platform', () => process.platform);
-
-app.on('window-all-closed', () => {
-  // Keep app running in background (no dock/taskbar icon)
-  if (process.platform !== 'darwin') {
-    globalShortcut.unregisterAll();
-    // Don't quit — allow hotkey to re-open
-  }
-});
-
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  stopSidecar();
 });
+
+// ── IPC ───────────────────────────────────────────────────────────────────────
+
+ipcMain.on('hide-window',   hideWindow);
+ipcMain.on('show-window',   showWindow);
+ipcMain.handle('get-platform', () => process.platform);
