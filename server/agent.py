@@ -270,15 +270,19 @@ async def run_agent_stream(user_input: str) -> AsyncGenerator[str, None]:
             except (json.JSONDecodeError, TypeError):
                 action_payload = {"content": result["payload"]}
 
-            # Auto-attach: if SEND_EMAIL has no attachment_path but the user
-            # mentioned CV/resume, find the best PDF from RAG results
-            if action == "SEND_EMAIL" and not action_payload.get("attachment_path"):
+            # Auto-attach: always override attachment_path for CV emails
+            # (don't trust Gemini-hallucinated paths from RAG context)
+            if action == "SEND_EMAIL":
                 cv_keywords = {"cv", "resume", "curriculum vitae"}
                 if any(kw in user_input.lower() for kw in cv_keywords):
+                    logger.info("CV email detected; action_payload attachment_path=%r", action_payload.get("attachment_path"))
                     pdf_path = _find_cv_file()
                     if pdf_path:
                         action_payload["attachment_path"] = pdf_path
+                        logger.info("Overriding attachment_path with: %s", pdf_path)
                         yield _sse({"step": "search", "text": f"Auto-attaching CV: {Path(pdf_path).name}"})
+                    else:
+                        logger.warning("No CV file found on filesystem")
 
             yield _sse({
                 "step": "action_card",
