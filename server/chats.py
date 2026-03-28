@@ -54,12 +54,17 @@ def get_chat(chat_id: str) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def append_messages(chat_id: str, messages: list[dict]) -> dict | None:
-    """Append messages and update title / updated_at. Returns updated chat metadata."""
+def append_messages(chat_id: str, messages: list[dict]) -> tuple[dict | None, bool]:
+    """
+    Append messages and update updated_at.
+    Returns (chat_metadata, was_first_message).
+    Title is NOT auto-set here — caller should call update_title() with a summary.
+    """
     path = CHATS_DIR / f"{chat_id}.json"
     if not path.exists():
-        return None
+        return None, False
     chat = json.loads(path.read_text(encoding="utf-8"))
+    was_first = len(chat["messages"]) == 0
     now = datetime.now().isoformat()
     for msg in messages:
         chat["messages"].append({
@@ -68,15 +73,18 @@ def append_messages(chat_id: str, messages: list[dict]) -> dict | None:
             "timestamp": now,
         })
     chat["updated_at"] = now
-    # Auto-title from first user message
-    if chat["title"] == "New Chat":
-        for msg in chat["messages"]:
-            if msg["role"] == "user":
-                t = msg["content"]
-                chat["title"] = t[:48] + ("…" if len(t) > 48 else "")
-                break
     path.write_text(json.dumps(chat, indent=2, ensure_ascii=False), encoding="utf-8")
-    return {"id": chat["id"], "title": chat["title"], "updated_at": chat["updated_at"]}
+    return {"id": chat["id"], "title": chat["title"], "updated_at": chat["updated_at"]}, was_first
+
+
+def update_title(chat_id: str, title: str) -> None:
+    path = CHATS_DIR / f"{chat_id}.json"
+    if not path.exists():
+        return
+    chat = json.loads(path.read_text(encoding="utf-8"))
+    chat["title"] = title.strip()[:80] or "New Chat"
+    chat["updated_at"] = datetime.now().isoformat()
+    path.write_text(json.dumps(chat, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def delete_chat(chat_id: str) -> None:

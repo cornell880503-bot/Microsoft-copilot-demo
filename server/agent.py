@@ -131,6 +131,26 @@ def _clean_json(raw: str) -> str:
     return raw
 
 
+async def generate_chat_title(user_query: str) -> str:
+    """Ask Gemini for a 4-6 word chat title based on the first user message."""
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    model   = os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+    if not api_key:
+        return user_query[:48]
+    try:
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(
+            model=model,
+            contents=(
+                f"Give a 4-6 word chat title for a conversation that starts with this message. "
+                f"Reply with ONLY the title, no punctuation, no quotes:\n\n{user_query[:300]}"
+            ),
+        )
+        return resp.text.strip()[:60] or user_query[:48]
+    except Exception:
+        return user_query[:48]
+
+
 def _build_user_turn(user_input: str, active_window: str, rag_results: list[dict]) -> str:
     """Build the current user turn text (system prompt goes in system_instruction)."""
     rag_section = ""

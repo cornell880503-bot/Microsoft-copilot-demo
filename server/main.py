@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 
 import json as _json
 
-from agent import run_agent_stream
+from agent import run_agent_stream, generate_chat_title
 from email_sender import send_email
 from window_context import get_active_window_title
 from rag.indexer import index_local_data
@@ -212,10 +212,14 @@ async def agent_run(body: AgentRequest):
         finally:
             # Persist messages to disk after stream completes
             if conv_id and assistant_content:
-                chats_store.append_messages(conv_id, [
+                _, was_first = chats_store.append_messages(conv_id, [
                     {"role": "user",      "content": body.query},
                     {"role": "assistant", "content": assistant_content},
                 ])
+                # Generate a smart title from the first user message
+                if was_first:
+                    title = await generate_chat_title(body.query)
+                    chats_store.update_title(conv_id, title)
 
     return StreamingResponse(
         event_gen(),
@@ -240,6 +244,16 @@ async def get_chat(chat_id: str):
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
     return chat
+
+class RenameChatRequest(BaseModel):
+    title: str
+
+@app.patch("/chats/{chat_id}")
+async def rename_chat(chat_id: str, body: RenameChatRequest):
+    title = body.title.strip()
+    if title:
+        chats_store.update_title(chat_id, title)
+    return {"ok": True}
 
 @app.delete("/chats/{chat_id}")
 async def delete_chat(chat_id: str):

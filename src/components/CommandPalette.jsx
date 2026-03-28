@@ -57,28 +57,72 @@ function messagesToThoughts(messages) {
 /* ══════════════════════════════════════════════════════════════
    SIDEBAR
    ══════════════════════════════════════════════════════════════ */
-function Sidebar({ chats, activeChatId, onNewChat, onSelectChat, onDeleteChat }) {
+function ChatItem({ chat, isActive, onSelect, onDelete, onRename }) {
+  const [renaming, setRenaming] = React.useState(false);
+  const [draftName, setDraftName] = React.useState('');
+  const inputRef = React.useRef(null);
+
+  const startRename = (e) => {
+    e.stopPropagation();
+    setDraftName(chat.title);
+    setRenaming(true);
+    setTimeout(() => inputRef.current?.select(), 30);
+  };
+
+  const commitRename = () => {
+    setRenaming(false);
+    const trimmed = draftName.trim();
+    if (trimmed && trimmed !== chat.title) onRename(chat.id, trimmed);
+  };
+
+  return (
+    <div
+      className={`chat-item${isActive ? ' active' : ''}`}
+      onClick={() => !renaming && onSelect(chat.id)}
+      role="option"
+      aria-selected={isActive}
+    >
+      {renaming ? (
+        <input
+          ref={inputRef}
+          className="chat-rename-input"
+          value={draftName}
+          autoFocus
+          onChange={(e) => setDraftName(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+            if (e.key === 'Escape') setRenaming(false);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <>
+          <span className="chat-item-title">{chat.title}</span>
+          <span className="chat-item-date">{formatDate(chat.updated_at)}</span>
+          <div className="chat-item-actions">
+            <button className="chat-action-btn" onClick={startRename} title="Rename">✏</button>
+            <button className="chat-action-btn chat-action-delete" onClick={(e) => { e.stopPropagation(); onDelete(chat.id); }} title="Delete">✕</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Sidebar({ chats, activeChatId, onNewChat, onSelectChat, onDeleteChat, onRenameChat }) {
   return (
     <div className="sidebar">
-      {/* Logo + New Chat button */}
       <div className="sidebar-header">
         <div className="sidebar-logo">
           <CopilotIcon size={16} />
           <span className="sidebar-logo-label">Copilot</span>
         </div>
-        <button
-          className="new-chat-btn"
-          onClick={onNewChat}
-          title="New Chat"
-          aria-label="New Chat"
-        >
-          +
-        </button>
+        <button className="new-chat-btn" onClick={onNewChat} title="New Chat" aria-label="New Chat">+</button>
       </div>
 
       <div className="sidebar-divider" />
 
-      {/* Chat list */}
       {chats.length === 0 ? (
         <div className="sidebar-empty">
           <CopilotIcon size={28} />
@@ -88,24 +132,14 @@ function Sidebar({ chats, activeChatId, onNewChat, onSelectChat, onDeleteChat })
       ) : (
         <div className="chat-list" role="listbox" aria-label="Conversations">
           {chats.map((chat) => (
-            <button
+            <ChatItem
               key={chat.id}
-              className={`chat-item${activeChatId === chat.id ? ' active' : ''}`}
-              onClick={() => onSelectChat(chat.id)}
-              role="option"
-              aria-selected={activeChatId === chat.id}
-            >
-              <span className="chat-item-title">{chat.title}</span>
-              <span className="chat-item-date">{formatDate(chat.updated_at)}</span>
-              <button
-                className="chat-delete-btn"
-                onClick={(e) => { e.stopPropagation(); onDeleteChat(chat.id); }}
-                aria-label="Delete chat"
-                title="Delete"
-              >
-                ✕
-              </button>
-            </button>
+              chat={chat}
+              isActive={activeChatId === chat.id}
+              onSelect={onSelectChat}
+              onDelete={onDeleteChat}
+              onRename={onRenameChat}
+            />
           ))}
         </div>
       )}
@@ -172,6 +206,16 @@ export default function CommandPalette() {
     } catch (err) {
       console.error('Failed to create chat:', err);
     }
+  }, []);
+
+  // ── Rename chat ─────────────────────────────────────────────
+  const handleRenameChat = useCallback(async (chatId, newTitle) => {
+    await fetch(`${SIDECAR}/chats/${chatId}`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ title: newTitle }),
+    }).catch(() => {});
+    setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, title: newTitle } : c));
   }, []);
 
   // ── Delete chat ─────────────────────────────────────────────
@@ -293,6 +337,7 @@ export default function CommandPalette() {
         onNewChat={handleNewChat}
         onSelectChat={handleSelectChat}
         onDeleteChat={handleDeleteChat}
+        onRenameChat={handleRenameChat}
       />
 
       {/* ── Main area ── */}
