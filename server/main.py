@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from agent import run_agent_stream
+from email_sender import send_email
 from window_context import get_active_window_title
 from rag.indexer import index_local_data
 from rag.searcher import search_docs
@@ -91,6 +92,12 @@ class SaveFileRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255)
     content:  str = Field(...)
 
+class SendEmailRequest(BaseModel):
+    to:              str = Field(..., min_length=1)
+    subject:         str = Field(...)
+    body:            str = Field(...)
+    attachment_path: str | None = Field(None)
+
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -129,6 +136,23 @@ async def search_documents(body: SearchRequest):
         )
     except Exception as e:
         logger.exception("Search failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/send-email")
+async def send_email_endpoint(body: SendEmailRequest):
+    """Send a real email via Gmail/Outlook SMTP with optional file attachment."""
+    try:
+        result = send_email(
+            to=body.to,
+            subject=body.subject,
+            body=body.body,
+            attachment_path=body.attachment_path,
+        )
+        logger.info("Email sent: %s", result)
+        return result
+    except Exception as e:
+        logger.exception("Failed to send email")
         raise HTTPException(status_code=500, detail=str(e))
 
 

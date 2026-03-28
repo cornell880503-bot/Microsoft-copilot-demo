@@ -30,7 +30,7 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
   };
 
   const confirmedMessage = {
-    SEND_EMAIL: 'Email opened in your mail app',
+    SEND_EMAIL: `Email sent to ${fields.to}${fields.attachment_path ? ' with attachment' : ''}`,
     SAVE_FILE:  `File saved to ~/Downloads/${fields.filename || 'file'}`,
   }[action] || 'Action synced to your Office workflow';
 

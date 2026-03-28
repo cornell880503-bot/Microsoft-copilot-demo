@@ -145,10 +145,20 @@ ipcMain.handle('get-platform', () => process.platform);
 ipcMain.handle('confirm-action', async (_event, action, fields) => {
   try {
     if (action === 'SEND_EMAIL') {
-      const to      = encodeURIComponent(fields.to      || '');
-      const subject = encodeURIComponent(fields.subject || '');
-      const body    = encodeURIComponent(fields.body    || '');
-      await shell.openExternal(`mailto:${to}?subject=${subject}&body=${body}`);
+      const res = await fetch('http://127.0.0.1:8765/send-email', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          to:              fields.to,
+          subject:         fields.subject,
+          body:            fields.body,
+          attachment_path: fields.attachment_path || null,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to send email');
+      }
     }
 
     if (action === 'SAVE_FILE') {

@@ -54,7 +54,8 @@ Action selection rules:
 - SEND_EMAIL        → user wants to compose and send an email to someone
 - SAVE_FILE         → user wants to save content to a file on their computer
 
-For SEND_EMAIL, structure payload as JSON string: {"to":"...","subject":"...","body":"..."}
+For SEND_EMAIL, structure payload as JSON string:
+{"to":"...","subject":"...","body":"...","attachment_path":"<absolute path to file if user mentioned attaching one, else null>"}
 For SAVE_FILE, structure payload as JSON string: {"filename":"...","content":"..."}
 
 Tailor your tone to the active application context.
