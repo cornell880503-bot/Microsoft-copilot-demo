@@ -23,7 +23,7 @@ from google import genai
 from google.genai import types
 
 from rag.searcher import search_docs
-from window_context import get_active_window_title
+from window_context import get_active_window_title, capture_screen_base64
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ You are Copilot, an intelligent desktop AI assistant embedded in the user's work
 
 You will receive:
 - The user's currently active application window title
+- A screenshot of the user's screen (when available) — you CAN see what is on their screen
 - The user's query
 - Optionally: relevant excerpts from their local knowledge base
 
@@ -237,6 +238,13 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     active_window = get_active_window_title() or "Unknown"
     yield _sse({"step": "context", "text": f"Active window: {active_window}"})
 
+    yield _sse({"step": "context", "text": "Capturing screen content..."})
+    screen_b64 = capture_screen_base64()
+    if screen_b64:
+        yield _sse({"step": "context", "text": "Screen captured — model can see your display"})
+    else:
+        yield _sse({"step": "context", "text": "Screen capture unavailable"})
+
     # ── Step 2: Local RAG Search ───────────────────────────────────────────
     yield _sse({"step": "search", "text": "Searching local knowledge base..."})
     try:
@@ -267,7 +275,17 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         for msg in (history or []):
             role = "user" if msg["role"] == "user" else "model"
             contents.append({"role": role, "parts": [{"text": msg["content"]}]})
-        contents.append({"role": "user", "parts": [{"text": _build_user_turn(user_input, active_window, rag_results)}]})
+
+        # Current turn: include screenshot if available
+        user_text = _build_user_turn(user_input, active_window, rag_results)
+        if screen_b64:
+            current_parts = [
+                {"inline_data": {"mime_type": "image/png", "data": screen_b64}},
+                {"text": user_text},
+            ]
+        else:
+            current_parts = [{"text": user_text}]
+        contents.append({"role": "user", "parts": current_parts})
 
         logger.info("Sending %d-turn conversation to Gemini", len(contents))
         response = client.models.generate_content(
