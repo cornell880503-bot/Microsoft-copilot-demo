@@ -1,16 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import SearchInput from './SearchInput';
 import AgentThoughts from './AgentThoughts';
 
+const SIDECAR = 'http://127.0.0.1:8765';
+
 const INITIAL_THOUGHTS = [
   { id: 1, type: 'info',    text: 'Copilot initialized. Awaiting command...' },
-  { id: 2, type: 'process', text: 'Loading context from workspace...' },
-  { id: 3, type: 'success', text: 'Context loaded. 3 active agents ready.' },
-  { id: 4, type: 'info',    text: 'Memory index: 1,204 embeddings cached.' },
-  { id: 5, type: 'process', text: 'Monitoring file system for changes...' },
+  { id: 2, type: 'success', text: 'Local knowledge base ready.' },
+  { id: 3, type: 'info',    text: 'Type a query and press Enter to begin.' },
 ];
 
-// Copilot sparkle icon — matches Microsoft Copilot brand
 function CopilotIcon() {
   return (
     <svg className="copilot-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -21,7 +20,6 @@ function CopilotIcon() {
           <stop offset="100%" stopColor="#C239B3" />
         </linearGradient>
       </defs>
-      {/* Copilot-style sparkle / wing shape */}
       <path
         d="M10 2C10 2 13.5 5 18 5C18 5 15 8.5 18 13C18 13 13.5 12 10 18C10 18 6.5 12 2 13C2 13 5 8.5 2 5C2 5 6.5 5 10 2Z"
         fill="url(#cg)"
@@ -31,35 +29,81 @@ function CopilotIcon() {
   );
 }
 
+let _nextId = 10;
+const nextId = () => ++_nextId;
+
 export default function CommandPalette() {
-  const [query, setQuery] = useState('');
+  const [query, setQuery]       = useState('');
   const [thoughts, setThoughts] = useState(INITIAL_THOUGHTS);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleSearch = (value) => setQuery(value);
+  const addThought = useCallback((thought) => {
+    setThoughts((prev) => [...prev, { id: nextId(), ...thought }]);
+  }, []);
 
-  const handleSubmit = (value) => {
-    if (!value.trim()) return;
+  const handleSubmit = useCallback(async (value) => {
+    if (!value.trim() || isProcessing) return;
 
-    setThoughts((prev) => [...prev, { id: Date.now(), type: 'user', text: `> ${value}` }]);
-    setIsProcessing(true);
+    addThought({ type: 'user', text: `> ${value}` });
     setQuery('');
+    setIsProcessing(true);
 
-    setTimeout(() => {
-      setThoughts((prev) => [
-        ...prev,
-        { id: Date.now() + 1, type: 'process', text: `Analyzing: "${value}"...` },
-      ]);
-    }, 400);
+    try {
+      const response = await fetch(`${SIDECAR}/agent/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: value }),
+      });
 
-    setTimeout(() => {
-      setThoughts((prev) => [
-        ...prev,
-        { id: Date.now() + 2, type: 'success', text: 'Response ready. Streaming output...' },
-      ]);
+      if (!response.ok) {
+        throw new Error(`Sidecar error: ${response.status}`);
+      }
+
+      // ── Read Server-Sent Events stream ────────────────────────────────────
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let   buffer  = '';
+
+      while (true) {
+        const { done, value: chunk } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete last line
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let event;
+          try {
+            event = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+
+          const { step, text, thought, action, payload } = event;
+
+          if (step === 'result') {
+            addThought({ type: 'result', thought, action, payload });
+          } else if (step === 'error') {
+            addThought({ type: 'error', text });
+          } else {
+            // context / search / think → show as process thought
+            addThought({ type: step, text });
+          }
+        }
+      }
+    } catch (err) {
+      addThought({
+        type: 'error',
+        text: err.message.includes('fetch')
+          ? 'Cannot reach sidecar — is the Python server running? (bash start.sh)'
+          : err.message,
+      });
+    } finally {
       setIsProcessing(false);
-    }, 1200);
-  };
+    }
+  }, [isProcessing, addThought]);
 
   return (
     <div className="palette-shell">
@@ -82,7 +126,7 @@ export default function CommandPalette() {
 
       <SearchInput
         value={query}
-        onChange={handleSearch}
+        onChange={setQuery}
         onSubmit={handleSubmit}
         isProcessing={isProcessing}
       />

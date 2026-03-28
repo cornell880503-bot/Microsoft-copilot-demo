@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 python-dotenv
 
-# RAG stack — unpinned so pip resolves correctly for Python 3.13+
+# RAG stack
 langchain
 langchain-community
 langchain-text-splitters
@@ -11,6 +11,7 @@ langchain-huggingface
 chromadb
 sentence-transformers
 
-# Windows-only: pywin32
-# pip install pywin32
-# On macOS/Linux the active-window endpoint uses platform-native fallbacks
+# Gemini
+google-generativeai
+
+# Windows-only: pip install pywin32

@@ -315,6 +315,62 @@ html, body, #root {
   letter-spacing: 0.03em;
 }
 
+/* ─── Result Card ────────────────────────────────────────────────────────────── */
+.result-card {
+  margin: 4px 0;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(0, 80, 180, 0.12);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  animation: thought-in 0.2s ease-out both;
+  box-shadow: 0 1px 4px rgba(0, 80, 180, 0.06);
+}
+
+.result-thought {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  font-size: 11.5px;
+  color: #505d70;
+  line-height: 1.5;
+}
+
+.result-thought-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.result-action-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  width: fit-content;
+}
+
+.result-action-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.result-payload {
+  font-size: 12.5px;
+  color: #1a1a2e;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ─── Spinner ────────────────────────────────────────────────────────────────── */
 .spin {
   animation: spin 0.8s linear infinite;
