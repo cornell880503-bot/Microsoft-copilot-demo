@@ -58,22 +58,19 @@ function messagesToThoughts(messages) {
    SIDEBAR
    ══════════════════════════════════════════════════════════════ */
 function ChatItem({ chat, isActive, onSelect, onDelete, onRename }) {
-  const [menuOpen, setMenuOpen]   = React.useState(false);
+  const [expanded, setExpanded]   = React.useState(false);
   const [renaming, setRenaming]   = React.useState(false);
   const [draftName, setDraftName] = React.useState('');
-  const menuRef  = React.useRef(null);
   const inputRef = React.useRef(null);
 
-  // Close menu when clicking outside
-  React.useEffect(() => {
-    if (!menuOpen) return;
-    const close = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [menuOpen]);
+  const openActions = (e) => {
+    e.stopPropagation();
+    setExpanded((v) => !v);
+  };
 
-  const startRename = () => {
-    setMenuOpen(false);
+  const startRename = (e) => {
+    e.stopPropagation();
+    setExpanded(false);
     setDraftName(chat.title);
     setRenaming(true);
     setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 30);
@@ -87,48 +84,57 @@ function ChatItem({ chat, isActive, onSelect, onDelete, onRename }) {
 
   return (
     <div
-      className={`chat-item${isActive ? ' active' : ''}`}
-      onClick={() => !renaming && !menuOpen && onSelect(chat.id)}
+      className={`chat-item${isActive ? ' active' : ''}${expanded ? ' chat-item-expanded' : ''}`}
+      onClick={() => !renaming && !expanded && onSelect(chat.id)}
     >
-      {renaming ? (
-        <input
-          ref={inputRef}
-          className="chat-rename-input"
-          value={draftName}
-          onChange={(e) => setDraftName(e.target.value)}
-          onBlur={commitRename}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter')  { e.preventDefault(); commitRename(); }
-            if (e.key === 'Escape') setRenaming(false);
-          }}
-          onClick={(e) => e.stopPropagation()}
-        />
-      ) : (
-        <>
+      {/* Title row */}
+      <div className="chat-item-row">
+        {renaming ? (
+          <input
+            ref={inputRef}
+            className="chat-rename-input"
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter')  { e.preventDefault(); commitRename(); }
+              if (e.key === 'Escape') setRenaming(false);
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
           <span className="chat-item-title">{chat.title}</span>
-          <span className="chat-item-date">{formatDate(chat.updated_at)}</span>
+        )}
+        <button
+          className={`chat-menu-btn${expanded ? ' chat-menu-btn-active' : ''}`}
+          onClick={openActions}
+          aria-label="Chat options"
+        >
+          ···
+        </button>
+      </div>
 
-          {/* Kebab menu button — always visible, no hover dependency */}
-          <div className="chat-menu-wrap" ref={menuRef}>
-            <button
-              className="chat-menu-btn"
-              onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
-              aria-label="Chat options"
-            >
-              ···
-            </button>
-            {menuOpen && (
-              <div className="chat-menu-dropdown">
-                <button className="chat-menu-item" onClick={(e) => { e.stopPropagation(); startRename(); }}>
-                  ✏ Rename
-                </button>
-                <button className="chat-menu-item chat-menu-item-danger" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete(chat.id); }}>
-                  🗑 Delete
-                </button>
-              </div>
-            )}
-          </div>
-        </>
+      {/* Date row — hidden when expanded */}
+      {!expanded && !renaming && (
+        <span className="chat-item-date">{formatDate(chat.updated_at)}</span>
+      )}
+
+      {/* Inline action row — shown when expanded */}
+      {expanded && (
+        <div className="chat-action-row">
+          <button
+            className="chat-action-pill"
+            onClick={startRename}
+          >
+            ✏ Rename
+          </button>
+          <button
+            className="chat-action-pill chat-action-pill-danger"
+            onClick={(e) => { e.stopPropagation(); setExpanded(false); onDelete(chat.id); }}
+          >
+            🗑 Delete
+          </button>
+        </div>
       )}
     </div>
   );
