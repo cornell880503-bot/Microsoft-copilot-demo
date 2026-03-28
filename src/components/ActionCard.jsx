@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+const SIDECAR = 'http://127.0.0.1:8765';
+
 const ACTION_META = {
   SEND_EMAIL: {
     icon: '📧',
@@ -25,8 +27,35 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
 
   const handleConfirm = async () => {
     setConfirmed(true);
-    const result = await window.orion?.confirmAction(action, fields);
-    onConfirm?.(action, fields, result);
+    try {
+      if (action === 'SEND_EMAIL') {
+        const res = await fetch(`${SIDECAR}/send-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to:              fields.to,
+            subject:         fields.subject,
+            body:            fields.body,
+            attachment_path: fields.attachment_path || null,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Failed to send email');
+        }
+      } else if (action === 'SAVE_FILE') {
+        await fetch(`${SIDECAR}/save-file`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: fields.filename, content: fields.content }),
+        });
+      } else {
+        await window.orion?.confirmAction(action, fields);
+      }
+    } catch (err) {
+      console.error('[ActionCard] confirm error:', err);
+    }
+    onConfirm?.(action, fields);
   };
 
   const confirmedMessage = {
