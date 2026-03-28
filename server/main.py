@@ -81,6 +81,9 @@ class SearchResponse(BaseModel):
     results: list[SearchResult]
     total: int
 
+class IndexRequest(BaseModel):
+    extra_dirs: list[str] = Field(default_factory=list, description="Extra absolute folder paths to index")
+
 class AgentRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
 
@@ -101,9 +104,9 @@ async def get_active_window():
 
 
 @app.post("/index-docs")
-async def index_docs():
+async def index_docs(body: IndexRequest = IndexRequest()):
     try:
-        result = index_local_data()
+        result = index_local_data(extra_dirs=body.extra_dirs or None)
         logger.info("Indexing complete: %s", result)
         return result
     except Exception as e:

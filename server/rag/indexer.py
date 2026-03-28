@@ -1,5 +1,5 @@
 """
-Indexes all .txt files in ./local_data into a persistent ChromaDB vector store.
+Indexes .txt and .md files from one or more folders into a persistent ChromaDB vector store.
 Uses HuggingFace sentence-transformers (all-MiniLM-L6-v2) — fully local, no API key.
 """
 
@@ -14,12 +14,17 @@ from langchain_chroma import Chroma
 
 logger = logging.getLogger(__name__)
 
-# Paths (resolved relative to this file so they work as a sidecar)
-_SERVER_DIR  = Path(__file__).parent.parent
-LOCAL_DATA   = _SERVER_DIR / "local_data"
-CHROMA_DIR   = _SERVER_DIR / "chroma_store"
-COLLECTION   = "local_docs"
-EMBED_MODEL  = "all-MiniLM-L6-v2"
+_SERVER_DIR = Path(__file__).parent.parent
+LOCAL_DATA  = _SERVER_DIR / "local_data"
+CHROMA_DIR  = _SERVER_DIR / "chroma_store"
+COLLECTION  = "local_docs"
+EMBED_MODEL = "all-MiniLM-L6-v2"
+
+# Extra folders to index, read from env var EXTRA_DATA_DIRS (colon-separated paths)
+# e.g. EXTRA_DATA_DIRS=/Users/you/Downloads:/Users/you/Documents
+def _extra_dirs() -> list[Path]:
+    raw = os.getenv("EXTRA_DATA_DIRS", "")
+    return [Path(p).expanduser() for p in raw.split(":") if p.strip()]
 
 
 def _get_embeddings() -> HuggingFaceEmbeddings:
@@ -31,7 +36,6 @@ def _get_embeddings() -> HuggingFaceEmbeddings:
 
 
 def get_vector_store() -> Chroma:
-    """Return the persistent Chroma vector store (creates it if missing)."""
     CHROMA_DIR.mkdir(parents=True, exist_ok=True)
     return Chroma(
         collection_name=COLLECTION,
@@ -40,45 +44,57 @@ def get_vector_store() -> Chroma:
     )
 
 
-def index_local_data() -> dict:
+def index_local_data(extra_dirs: list[str] | None = None) -> dict:
     """
-    Scan ./local_data for .txt files, chunk them, and upsert into ChromaDB.
-    Returns a summary dict with file count and chunk count.
+    Scan local_data/ plus any extra_dirs for .txt and .md files,
+    chunk them, and upsert into ChromaDB.
+
+    extra_dirs: list of absolute path strings (from API call or env var).
     """
     LOCAL_DATA.mkdir(parents=True, exist_ok=True)
 
-    txt_files = list(LOCAL_DATA.glob("*.txt"))
-    if not txt_files:
-        logger.warning("No .txt files found in %s", LOCAL_DATA)
-        return {"files_indexed": 0, "chunks_added": 0, "message": "No .txt files found in local_data/"}
+    # Collect all directories to scan
+    scan_dirs: list[Path] = [LOCAL_DATA] + _extra_dirs()
+    if extra_dirs:
+        scan_dirs += [Path(p).expanduser() for p in extra_dirs if p.strip()]
 
-    # Load all .txt files
-    loader = DirectoryLoader(
-        str(LOCAL_DATA),
-        glob="*.txt",
-        loader_cls=TextLoader,
-        loader_kwargs={"encoding": "utf-8"},
-        show_progress=False,
-    )
-    docs = loader.load()
-    logger.info("Loaded %d documents from %s", len(docs), LOCAL_DATA)
+    all_files: list[Path] = []
+    all_docs  = []
 
-    # Split into chunks
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=50,
         separators=["\n\n", "\n", ". ", " ", ""],
     )
-    chunks = splitter.split_documents(docs)
-    logger.info("Split into %d chunks", len(chunks))
 
-    # Upsert into ChromaDB
+    for scan_dir in scan_dirs:
+        if not scan_dir.exists():
+            logger.warning("Directory not found, skipping: %s", scan_dir)
+            continue
+
+        for glob in ("*.txt", "*.md"):
+            files = list(scan_dir.glob(glob))
+            all_files.extend(files)
+
+            for f in files:
+                try:
+                    loader = TextLoader(str(f), encoding="utf-8")
+                    docs = loader.load()
+                    chunks = splitter.split_documents(docs)
+                    all_docs.extend(chunks)
+                    logger.info("Indexed %s → %d chunks", f.name, len(chunks))
+                except Exception as e:
+                    logger.warning("Skipping %s: %s", f.name, e)
+
+    if not all_files:
+        return {"files_indexed": 0, "chunks_added": 0, "message": "No .txt or .md files found in scanned directories"}
+
     store = get_vector_store()
-    store.add_documents(chunks)
-    logger.info("Indexed %d chunks into ChromaDB collection '%s'", len(chunks), COLLECTION)
+    store.add_documents(all_docs)
 
     return {
-        "files_indexed": len(txt_files),
-        "chunks_added": len(chunks),
-        "files": [f.name for f in txt_files],
+        "files_indexed": len(all_files),
+        "chunks_added": len(all_docs),
+        "files": [str(f) for f in all_files],
+        "dirs_scanned": [str(d) for d in scan_dirs],
     }
