@@ -15,6 +15,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +27,7 @@ from window_context import get_active_window_title
 from rag.indexer import index_local_data
 from rag.searcher import search_docs
 
-load_dotenv()
+load_dotenv(Path(__file__).parent / ".env")
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
