@@ -6,6 +6,7 @@ Reads credentials from environment: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
 import logging
 import os
 import smtplib
+import time
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -55,13 +56,22 @@ def send_email(
 
     logger.info("Sending email to=%s subject=%r via %s:%d", to, subject, host, port)
 
-    with smtplib.SMTP(host, port) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(user, password)
-        server.sendmail(user, to, msg.as_string())
+    last_error = None
+    for attempt in range(1, 3):  # 2 attempts
+        try:
+            with smtplib.SMTP(host, port, timeout=10) as server:
+                server.ehlo()
+                server.starttls()
+                server.login(user, password)
+                server.sendmail(user, to, msg.as_string())
+            result = {"ok": True, "to": to, "subject": subject}
+            if attached_name:
+                result["attached"] = attached_name
+            return result
+        except (smtplib.SMTPException, OSError) as e:
+            last_error = e
+            logger.warning("SMTP attempt %d failed: %s", attempt, e)
+            if attempt < 2:
+                time.sleep(2)
 
-    result = {"ok": True, "to": to, "subject": subject}
-    if attached_name:
-        result["attached"] = attached_name
-    return result
+    raise ConnectionError(f"Email delivery failed after 2 attempts: {last_error}")

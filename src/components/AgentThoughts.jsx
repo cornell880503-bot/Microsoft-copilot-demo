@@ -36,6 +36,7 @@ const TYPE_STYLES = {
   process: { bar: '#8661C5', label: 'PROC'  },
   success: { bar: '#107C10', label: 'DONE'  },
   error:   { bar: '#D13438', label: 'ERR'   },
+  heal:    { bar: '#FF8C00', label: 'HEAL'  },
 };
 
 function ThoughtEntry({ thought, onActionConfirm, onActionCancel }) {

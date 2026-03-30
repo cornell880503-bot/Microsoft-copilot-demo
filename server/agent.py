@@ -241,9 +241,9 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     yield _sse({"step": "context", "text": "Capturing screen content..."})
     screen_b64 = capture_screen_base64()
     if screen_b64:
-        yield _sse({"step": "context", "text": "Screen captured — model can see your display"})
+        yield _sse({"step": "context", "text": "Screen captured — sent to AI, not stored locally"})
     else:
-        yield _sse({"step": "context", "text": "Screen capture unavailable"})
+        yield _sse({"step": "context", "text": "Screen capture unavailable — proceeding with window title only"})
 
     # ── Step 2: Local RAG Search ───────────────────────────────────────────
     yield _sse({"step": "search", "text": "Searching local knowledge base..."})
@@ -252,11 +252,12 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         if rag_results:
             yield _sse({"step": "search", "text": f"Found {len(rag_results)} relevant document(s) (top score: {rag_results[0]['score']:.3f})"})
         else:
-            yield _sse({"step": "search", "text": "No matching local documents found"})
+            yield _sse({"step": "heal", "text": "No local documents matched — AI expanding to general knowledge..."})
+            rag_results = []
     except Exception as e:
         logger.warning("RAG search failed: %s", e)
         rag_results = []
-        yield _sse({"step": "search", "text": "Local search unavailable — proceeding without context"})
+        yield _sse({"step": "heal", "text": "Local knowledge base unavailable — AI is falling back to general reasoning..."})
 
     # ── Step 3: Gemini Decision ────────────────────────────────────────────
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -294,7 +295,28 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
         )
         raw = _clean_json(response.text)
-        result = json.loads(raw)
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError:
+            # Self-healing: retry with an explicit re-prompt
+            yield _sse({"step": "heal", "text": "Response format error — AI is self-correcting and retrying..."})
+            logger.warning("Gemini returned non-JSON on first attempt, retrying: %s", response.text[:200])
+            retry_contents = contents + [
+                {"role": "model", "parts": [{"text": response.text}]},
+                {"role": "user", "parts": [{"text": (
+                    "Your previous response was not valid JSON. "
+                    "You MUST reply with ONLY a single valid JSON object using exactly this schema, "
+                    "no markdown, no explanation:\n"
+                    '{"thought":"...","action":"...","payload":"..."}'
+                )}]},
+            ]
+            response = client.models.generate_content(
+                model=model_name,
+                contents=retry_contents,
+                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+            )
+            raw = _clean_json(response.text)
+            result = json.loads(raw)
 
         for key in ("thought", "action", "payload"):
             if key not in result:
@@ -377,10 +399,11 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         yield _sse({"step": "result", **result})
 
     except json.JSONDecodeError:
-        logger.error("Gemini returned non-JSON: %s", response.text[:200])
+        logger.error("Gemini returned non-JSON after retry: %s", response.text[:200])
+        yield _sse({"step": "heal", "text": "AI self-correction did not fully resolve — presenting raw response."})
         yield _sse({
             "step": "result",
-            "thought": "Gemini returned a non-structured response; presenting as-is.",
+            "thought": "Response could not be structured after retry.",
             "action": "DRAFT_CONTENT",
             "payload": response.text,
         })
