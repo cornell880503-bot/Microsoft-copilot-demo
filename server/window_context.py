@@ -38,6 +38,28 @@ def _macos_frontmost() -> str:
     except Exception:
         return ""
 
+def _macos_first_visible_non_electron() -> str:
+    """Return the first visible non-Electron app — used at startup."""
+    try:
+        script = """\
+tell application "System Events"
+    set visibleApps to name of every application process whose visible is true
+end tell
+set prev to ""
+repeat with appName in visibleApps
+    set appStr to appName as string
+    if appStr is not "Electron" and appStr is not "loginwindow" and appStr is not "Finder" and appStr is not "Dock" then
+        set prev to appStr
+        exit repeat
+    end if
+end repeat
+return prev
+"""
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=3)
+        return r.stdout.strip()
+    except Exception:
+        return ""
+
 def _background_monitor():
     global _last_user_app
     while True:
@@ -47,6 +69,11 @@ def _background_monitor():
         time.sleep(1)
 
 if sys.platform == "darwin":
+    # Pre-populate immediately so the first /get-active-window call is useful
+    _initial = _macos_first_visible_non_electron()
+    if _initial:
+        _last_user_app = _initial
+        logger.info("Initial user app: %s", _initial)
     threading.Thread(target=_background_monitor, daemon=True).start()
 
 
@@ -83,7 +110,7 @@ def capture_screen_base64() -> Optional[str]:
                 ["osascript", "-e", 'tell application "Electron" to set visible to false'],
                 timeout=3, capture_output=True,
             )
-            time.sleep(0.35)
+            time.sleep(0.6)
             try:
                 subprocess.run(
                     ["screencapture", "-x", "-t", "png", str(tmp)],
