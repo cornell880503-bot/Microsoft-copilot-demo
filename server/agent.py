@@ -28,8 +28,8 @@ from window_context import get_active_window_title, capture_screen_base64, get_a
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL        = "gemini-2.0-flash"
-FALLBACK_MODEL       = "gemini-3-flash-preview"   # fallback when primary is overloaded
+DEFAULT_MODEL        = "gemini-3-flash-preview"
+FALLBACK_MODEL       = "gemini-2.5-flash"   # fallback when primary is overloaded
 IMAGE_MODEL          = "gemini-3.1-flash-image-preview"
 IMAGE_MODEL_FALLBACK = "gemini-2.0-flash-exp-image-generation"
 
