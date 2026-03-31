@@ -462,7 +462,9 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             for folder in search_dirs:
                 if not folder.exists():
                     continue
-                for ext in ("*.pdf", "*.docx", "*.doc", "*.txt", "*.md"):
+                for ext in ("*.pdf", "*.docx", "*.doc", "*.txt", "*.md",
+                            "*.xlsx", "*.xls", "*.csv", "*.pptx", "*.ppt",
+                            "*.pages", "*.numbers", "*.key"):
                     for f in folder.glob(ext):
                         found.append(f)
 
