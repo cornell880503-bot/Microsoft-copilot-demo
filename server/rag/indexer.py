@@ -1,6 +1,6 @@
 """
-Indexes .txt, .md, .pdf, and image (.png/.jpg) files from one or more folders
-into a persistent ChromaDB vector store.
+Indexes .txt, .md, .pdf, .csv, .xlsx, .docx, and image (.png/.jpg) files
+from local_data/ plus ~/Downloads, ~/Documents, ~/Desktop into ChromaDB.
 """
 
 import logging
@@ -21,8 +21,15 @@ CHROMA_DIR  = _SERVER_DIR / "chroma_store"
 COLLECTION  = "local_docs"
 EMBED_MODEL = "all-MiniLM-L6-v2"
 
-SUPPORTED_EXTS = {".txt", ".md", ".pdf", ".png", ".jpg", ".jpeg"}
+SUPPORTED_EXTS = {".txt", ".md", ".pdf", ".png", ".jpg", ".jpeg",
+                  ".csv", ".xlsx", ".xls", ".docx"}
 
+
+_DEFAULT_SCAN_DIRS = [
+    Path.home() / "Downloads",
+    Path.home() / "Documents",
+    Path.home() / "Desktop",
+]
 
 def _extra_dirs() -> list[Path]:
     raw = os.getenv("EXTRA_DATA_DIRS", "")
@@ -61,12 +68,40 @@ def _load_image(path: Path) -> list[Document]:
             return []
         return [Document(page_content=text, metadata={"source": str(path)})]
     except ImportError:
-        logger.error(
-            "pytesseract or Pillow not installed. Run: pip install pytesseract Pillow"
-        )
+        logger.error("pytesseract or Pillow not installed.")
         return []
     except Exception as e:
         logger.warning("OCR failed for %s: %s", path.name, e)
+        return []
+
+
+def _load_csv(path: Path) -> list[Document]:
+    text = path.read_text(encoding="utf-8", errors="ignore")[:50000]
+    return [Document(page_content=text, metadata={"source": str(path)})]
+
+
+def _load_xlsx(path: Path) -> list[Document]:
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, data_only=True)
+        ws = wb.active
+        rows = ["\t".join(str(v) if v is not None else "" for v in row)
+                for row in ws.iter_rows(values_only=True)]
+        text = "\n".join(rows)[:50000]
+        return [Document(page_content=text, metadata={"source": str(path)})]
+    except Exception as e:
+        logger.warning("xlsx load failed for %s: %s", path.name, e)
+        return []
+
+
+def _load_docx(path: Path) -> list[Document]:
+    try:
+        from docx import Document as DocxDocument
+        doc = DocxDocument(str(path))
+        text = "\n".join(p.text for p in doc.paragraphs)[:50000]
+        return [Document(page_content=text, metadata={"source": str(path)})]
+    except Exception as e:
+        logger.warning("docx load failed for %s: %s", path.name, e)
         return []
 
 
@@ -81,6 +116,12 @@ def _load_file(path: Path) -> list[Document]:
         return _load_pdf(path)
     elif ext in {".png", ".jpg", ".jpeg"}:
         return _load_image(path)
+    elif ext == ".csv":
+        return _load_csv(path)
+    elif ext in {".xlsx", ".xls"}:
+        return _load_xlsx(path)
+    elif ext == ".docx":
+        return _load_docx(path)
     else:
         return _load_text(path)
 
@@ -93,7 +134,7 @@ def index_local_data(extra_dirs: list[str] | None = None) -> dict:
     """
     LOCAL_DATA.mkdir(parents=True, exist_ok=True)
 
-    scan_dirs: list[Path] = [LOCAL_DATA] + _extra_dirs()
+    scan_dirs: list[Path] = [LOCAL_DATA] + _DEFAULT_SCAN_DIRS + _extra_dirs()
     if extra_dirs:
         scan_dirs += [Path(p).expanduser() for p in extra_dirs if p.strip()]
 
