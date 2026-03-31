@@ -8,6 +8,7 @@ Cross-platform active window detection + screen capture.
 
 import base64
 import logging
+import os
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,14 @@ from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _display_env() -> dict:
+    """Return env dict with DISPLAY set — required for X11 tools on Linux."""
+    env = os.environ.copy()
+    if not env.get("DISPLAY"):
+        env["DISPLAY"] = ":99"   # default Xvfb display used by npm run dev
+    return env
 
 
 def get_active_window_title() -> Optional[str]:
@@ -55,12 +64,15 @@ def capture_screen_base64() -> Optional[str]:
                     timeout=3, capture_output=True,
                 )
         elif platform == "linux":
-            # Try scrot, fall back to gnome-screenshot
+            env = _display_env()
             try:
-                subprocess.run(["scrot", str(tmp)], check=True, timeout=5, capture_output=True)
+                subprocess.run(
+                    ["scrot", str(tmp)], check=True, timeout=5, capture_output=True, env=env
+                )
             except FileNotFoundError:
                 subprocess.run(
-                    ["gnome-screenshot", "-f", str(tmp)], check=True, timeout=5, capture_output=True
+                    ["gnome-screenshot", "-f", str(tmp)],
+                    check=True, timeout=5, capture_output=True, env=env,
                 )
         else:
             # Windows: use PIL if available
@@ -133,7 +145,8 @@ def _get_linux() -> Optional[str]:
     try:
         result = subprocess.run(
             ["xdotool", "getactivewindow", "getwindowname"],
-            capture_output=True, text=True, timeout=3
+            capture_output=True, text=True, timeout=3,
+            env=_display_env(),
         )
         title = result.stdout.strip()
         return title if title else None
