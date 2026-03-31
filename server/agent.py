@@ -232,12 +232,25 @@ def _build_user_turn(user_input: str, active_window: str, rag_results: list[dict
         )
         rag_section = f"\n\nLocal Knowledge Base Results:\n{excerpts}"
     doc_section = ""
-    if doc_text:
+    if doc_path:
         fname = Path(doc_path).name if doc_path else "document"
-        path_note = f" (path: {doc_path})" if doc_path else ""
-        doc_section = f"\n\nActive Document — {fname}{path_note}:\n{doc_text}"
-    elif doc_path:
-        doc_section = f"\n\nActive Document path: {doc_path}"
+        ext = Path(doc_path).suffix.lower() if doc_path else ""
+        if doc_text and ext not in (".csv", ".xlsx", ".xls"):
+            # For non-data files (PDF, Word, etc.) embed full text for reading/summarizing
+            doc_section = f"\n\nActive Document — {fname} (path: {doc_path}):\n{doc_text}"
+        elif doc_text:
+            # For data files: provide only the first few rows so AI knows the schema,
+            # but MUST use DOC_PATH env var to read the full file in code
+            preview = "\n".join(doc_text.splitlines()[:8])
+            doc_section = (
+                f"\n\nActive Document — {fname}\n"
+                f"Full file path (use this in code): {doc_path}\n"
+                f"File preview (first 8 rows):\n{preview}\n"
+                f"NOTE: Do NOT hardcode data. Always read the file using: "
+                f"pd.read_csv(os.environ['DOC_PATH']) or equivalent."
+            )
+        else:
+            doc_section = f"\n\nActive Document path: {doc_path}"
     return (
         f"Active Application: {active_window or 'Unknown'}\n"
         f"User Query: {user_input}"
