@@ -17,6 +17,7 @@ pytesseract
 Pillow
 openpyxl
 python-docx
+pandas
 
 # Gemini
 google-genai

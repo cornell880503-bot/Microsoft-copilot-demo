@@ -191,10 +191,11 @@ def _extract_text_from_file(path: str, max_chars: int = 6000) -> Optional[str]:
             wb = openpyxl.load_workbook(path, data_only=True)
             ws = wb.active
             rows = ["\t".join(str(v) if v is not None else "" for v in row)
-                    for row in ws.iter_rows(max_row=100, values_only=True)]
-            return "\n".join(rows).strip()[:max_chars] or None
+                    for row in ws.iter_rows(values_only=True)]  # all rows, no limit
+            return "\n".join(rows).strip()[:50000] or None
         elif ext == ".csv":
-            return Path(path).read_text(encoding="utf-8", errors="ignore")[:max_chars]
+            # Read full file for data analysis; 50k chars ~covers most datasets
+            return Path(path).read_text(encoding="utf-8", errors="ignore")[:50000]
         elif ext in (".docx",):
             from docx import Document
             doc = Document(path)

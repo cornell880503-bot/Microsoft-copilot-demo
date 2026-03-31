@@ -46,7 +46,7 @@ Your job is to analyze this context and choose the most useful action.
 You MUST respond with ONLY a single valid JSON object — no markdown, no explanation, no code fences:
 {
   "thought": "<1–2 sentence reasoning about what the user needs and why you chose this action>",
-  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | SCHEDULE_MEETING | OPEN_APP>",
+  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON>",
   "payload": "<the actual useful output: answer, drafted text, image description, email body, file content, or structured JSON>"
 }
 
@@ -58,8 +58,22 @@ Action selection rules:
 - SAVE_FILE          → user wants to save content to a file on their computer
 - SCHEDULE_MEETING   → user wants to create a calendar event or schedule a meeting
 - OPEN_APP           → user explicitly asks to LAUNCH a specific application by name (e.g. "open Spotify", "open Chrome"); NOT for finding files
+- EXECUTE_PYTHON     → user wants to analyze, count, calculate, or process data from the active document using Python — write and run actual code (use when user says "用python", "analyze", "calculate", "count", "分析", "計算")
 
 IMPORTANT: Never use OPEN_APP to open a file — use SEARCH_LOCAL_DOCS to find it first, then the user will choose to open it themselves.
+IMPORTANT: When user asks to analyze/calculate data from a file (e.g. count ratios, statistics), always use EXECUTE_PYTHON — NOT DRAFT_CONTENT.
+
+For EXECUTE_PYTHON, payload is a plain Python code string that:
+- Reads the file at path: os.environ.get('DOC_PATH', '')
+- Prints results to stdout
+- Uses pandas/openpyxl/pypdf as appropriate for the file type
+- Handles the file extension automatically
+Example:
+import os, pandas as pd
+path = os.environ.get('DOC_PATH', '')
+df = pd.read_csv(path)
+counts = df['case_type'].value_counts()
+for k,v in counts.items(): print(f"{k}: {v} ({v/len(df)*100:.1f}%)")
 
 For SEND_EMAIL, structure payload as JSON string:
 {"to":"...","subject":"...","body":"...","attachment_path":null}
@@ -219,7 +233,10 @@ def _build_user_turn(user_input: str, active_window: str, rag_results: list[dict
     doc_section = ""
     if doc_text:
         fname = Path(doc_path).name if doc_path else "document"
-        doc_section = f"\n\nActive Document — {fname}:\n{doc_text}"
+        path_note = f" (path: {doc_path})" if doc_path else ""
+        doc_section = f"\n\nActive Document — {fname}{path_note}:\n{doc_text}"
+    elif doc_path:
+        doc_section = f"\n\nActive Document path: {doc_path}"
     return (
         f"Active Application: {active_window or 'Unknown'}\n"
         f"User Query: {user_input}"
@@ -461,6 +478,39 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 "action": action,
                 "payload": action_payload,
             })
+            return
+
+        # ── EXECUTE_PYTHON: run AI-generated code against the active document ──
+        if action == "EXECUTE_PYTHON":
+            code = result["payload"] if isinstance(result["payload"], str) else str(result["payload"])
+            yield _sse({"step": "think", "text": "Running Python analysis on document..."})
+            logger.info("Executing Python code (doc_path=%s):\n%s", doc_path, code[:300])
+            try:
+                import subprocess as _sp
+                exec_env = os.environ.copy()
+                if doc_path:
+                    exec_env["DOC_PATH"] = doc_path
+                proc = _sp.run(
+                    ["python3", "-c", code],
+                    capture_output=True, text=True, timeout=30, env=exec_env,
+                )
+                output = proc.stdout.strip()
+                if proc.returncode != 0 and proc.stderr:
+                    output = f"⚠️ Error:\n{proc.stderr.strip()}\n\nOutput:\n{output}" if output else f"⚠️ Error:\n{proc.stderr.strip()}"
+                if not output:
+                    output = "(No output produced)"
+                fname = Path(doc_path).name if doc_path else "document"
+                yield _sse({
+                    "step": "result",
+                    "thought": result["thought"],
+                    "action": "DRAFT_CONTENT",
+                    "payload": f"**Python Analysis — {fname}**\n\n```\n{output}\n```",
+                })
+            except _sp.TimeoutExpired:
+                yield _sse({"step": "error", "text": "Python execution timed out (30s limit)"})
+            except Exception as exec_err:
+                logger.error("EXECUTE_PYTHON failed: %s", exec_err)
+                yield _sse({"step": "error", "text": f"Code execution failed: {exec_err}"})
             return
 
         # ── SEARCH_LOCAL_DOCS: scan filesystem for matching files ─────────
