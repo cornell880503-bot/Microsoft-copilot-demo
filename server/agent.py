@@ -445,25 +445,65 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             })
             return
 
-        # ── Default result ─────────────────────────────────────────────────
-        # Special case: SEARCH_LOCAL_DOCS for cv/resume → scan filesystem
+        # ── SEARCH_LOCAL_DOCS: scan filesystem for matching files ─────────
         if action == "SEARCH_LOCAL_DOCS":
-            cv_keywords = {"cv", "resume", "curriculum vitae", "簡歷", "履歷"}
-            if any(kw in user_input.lower() for kw in cv_keywords):
-                yield _sse({"step": "search", "text": "Scanning Downloads, Documents, Desktop for CV files..."})
-                pdf_path = _find_cv_file()
-                if pdf_path:
-                    fname = Path(pdf_path).name
-                    yield _sse({"step": "search", "text": f"Found: {fname}"})
+            yield _sse({"step": "search", "text": "Scanning Downloads, Documents, Desktop..."})
+            search_dirs = [
+                Path.home() / "Downloads",
+                Path.home() / "Documents",
+                Path.home() / "Desktop",
+            ]
+            extra = os.getenv("EXTRA_DATA_DIRS", "")
+            for p in extra.split(":"):
+                if p.strip():
+                    search_dirs.append(Path(p.strip()).expanduser())
+
+            found = []
+            for folder in search_dirs:
+                if not folder.exists():
+                    continue
+                for ext in ("*.pdf", "*.docx", "*.doc", "*.txt", "*.md"):
+                    for f in folder.glob(ext):
+                        found.append(f)
+
+            if found:
+                found.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+                yield _sse({"step": "search", "text": f"Found {len(found)} file(s) — asking AI to identify the best match..."})
+
+                file_list = "\n".join(
+                    f"- {f.name} (modified {__import__('datetime').datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d')}, path: {f})"
+                    for f in found[:20]
+                )
+                pick_response = client.models.generate_content(
+                    model=model_name,
+                    contents=(
+                        f"User asked: \"{user_input}\"\n\n"
+                        f"Files found on their computer:\n{file_list}\n\n"
+                        "Which file best matches what the user is looking for? "
+                        "Reply with ONLY a JSON object: "
+                        '{"path": "<full path>", "name": "<filename>", "reason": "<1 sentence>"}'
+                    ),
+                )
+                try:
+                    pick = json.loads(_clean_json(pick_response.text))
                     yield _sse({
                         "step": "result",
                         "thought": result["thought"],
                         "action": "SEARCH_LOCAL_DOCS",
-                        "payload": f"找到你的最新簡歷：**{fname}**\n\n路徑：`{pdf_path}`\n\n如需寄送，請說「幫我把簡歷寄給 XXX」。",
+                        "payload": f"找到：**{pick['name']}**\n\n{pick.get('reason','')}\n\n路徑：`{pick['path']}`\n\n如需寄送，請說「幫我把這個檔案寄給 XXX」。",
                     })
-                    return
-                else:
-                    yield _sse({"step": "heal", "text": "No CV/resume PDF found in Downloads, Documents or Desktop."})
+                except Exception:
+                    # Fallback: just list top 5
+                    listing = "\n".join(f"- **{f.name}** (`{f}`)" for f in found[:5])
+                    yield _sse({
+                        "step": "result",
+                        "thought": result["thought"],
+                        "action": "SEARCH_LOCAL_DOCS",
+                        "payload": f"找到以下檔案（依修改時間排序）：\n\n{listing}",
+                    })
+                return
+            else:
+                yield _sse({"step": "heal", "text": "No files found in Downloads, Documents or Desktop."})
 
         yield _sse({"step": "result", **result})
 
