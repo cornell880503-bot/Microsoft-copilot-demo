@@ -505,11 +505,11 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 else "pd.read_excel(os.environ['DOC_PATH'])" if ext in (".xlsx", ".xls")
                 else "open(os.environ['DOC_PATH']).read()"
             )
-            # Pass column names from preview so AI targets the right column
+            # Pass header + first 3 data rows so AI can see actual values per column
             col_hint = ""
             if doc_text:
-                first_line = doc_text.splitlines()[0] if doc_text else ""
-                col_hint = f"Column names (from header row): {first_line}\n"
+                preview_lines = doc_text.splitlines()[:4]  # header + 3 rows
+                col_hint = "File preview (header + first 3 rows):\n" + "\n".join(preview_lines) + "\n"
             code_resp = client.models.generate_content(
                 model=model_name,
                 contents=(
