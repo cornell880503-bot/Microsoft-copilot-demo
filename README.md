@@ -1,6 +1,6 @@
 # Project Copilot — Microsoft Copilot Demo
 
-An AI-powered desktop assistant built with Electron + React + Python, styled after Microsoft Copilot. Demonstrates a full agentic workflow: RAG over local documents, screen context reading, image generation, email sending, and multi-turn conversation — all streamed in real time.
+An AI-powered desktop assistant built with Electron + React + Python, styled after Microsoft Copilot. Demonstrates a full agentic workflow: real-time document reading, RAG over local files, image generation, email sending, calendar scheduling, and multi-turn conversation — all streamed in real time.
 
 ---
 
@@ -8,17 +8,18 @@ An AI-powered desktop assistant built with Electron + React + Python, styled aft
 
 | Feature | Description |
 |---------|-------------|
-| **Screen Awareness** | Captures the desktop screenshot and sends it to Gemini so the model can "see" what app you are working in |
+| **Document-Aware Context** | Extracts actual text from the open document (PDF, Excel, CSV, Word) and passes it to the model — no screenshot guessing |
+| **Proactive Suggestions** | Background monitor tracks the active app; surfaces 3 context-aware action chips within seconds of opening Copilot |
 | **Local RAG** | Indexes your PDF / TXT files into a vector store and retrieves relevant content via semantic search |
+| **Semantic File Search** | Search files by natural language; AI ranks top 3–5 candidates with open (📂) and email (📧) buttons per result |
 | **Image Generation** | Calls Gemini Image Model with an auto-enhanced prompt and displays the result inline |
 | **Email Sending** | Drafts a complete email, auto-attaches your CV or last generated image, and sends it via SMTP |
+| **Schedule Meeting** | Creates a `.ics` calendar event and opens it in the system Calendar app |
+| **Open App** | Launches any macOS application by name; browser actions open a Bing search URL directly |
 | **Multi-turn Memory** | Maintains conversation context across messages and persists chats to disk (`~/.copilot/chats/`) |
 | **Conversation Sidebar** | Create, switch, rename, and delete conversations; AI auto-generates a title from the first message |
-| **Dual UI Mode** | User Mode (clean Copilot-style chat bubbles) / Demo Mode (full agent pipeline log) |
-| **Proactive Suggestions** | Polls the active window every 5s and surfaces 3 context-aware action chips without being asked |
-| **Schedule Meeting** | Creates a `.ics` calendar event and opens it in the system Calendar app |
-| **Open App** | Launches any macOS application by name; browser actions open a search URL directly |
-| **Self-healing Errors** | RAG failures and Gemini format errors trigger automatic fallback and retry, shown as HEAL steps in Demo Mode |
+| **Dual UI Mode** | User Mode (clean Copilot-style chat bubbles) / Demo Mode (full agent pipeline log with HEAL steps) |
+| **Self-healing Errors** | RAG failures and Gemini format errors trigger automatic fallback and retry, shown as amber HEAL steps |
 
 ---
 
@@ -59,10 +60,11 @@ Claude Code requires installation. Copilot ships on every Windows 11 PC by defau
 
 **Backend**
 - FastAPI (Python 3.12) — SSE streaming responses
-- Gemini 2.5 Flash — decision-making + multimodal (text + screenshot)
+- Gemini 2.5 Flash — decision-making + multimodal
 - Gemini Image Model — image generation
 - ChromaDB + `sentence-transformers/all-MiniLM-L6-v2` — local vector search
 - LangChain — PDF / TXT parsing and chunking
+- `pypdf`, `openpyxl`, `python-docx` — document text extraction
 
 ---
 
@@ -130,7 +132,7 @@ Microsoft-copilot-demo/
 │   ├── components/
 │   │   ├── CommandPalette.jsx  # Main component: sidebar + conversation management
 │   │   ├── AgentThoughts.jsx   # Message rendering (User / Demo dual mode)
-│   │   ├── ActionCard.jsx      # Email / save file confirmation card
+│   │   ├── ActionCard.jsx      # Email / save / schedule / open-app confirmation cards
 │   │   └── SearchInput.jsx     # Input bar
 │   └── styles/
 │       └── index.css
@@ -138,8 +140,8 @@ Microsoft-copilot-demo/
     ├── main.py                 # FastAPI routes
     ├── agent.py                # Gemini agent pipeline (SSE streaming)
     ├── chats.py                # Chat persistence (~/.copilot/chats/)
-    ├── window_context.py       # Screen capture + foreground app detection
-    ├── email_sender.py         # SMTP email sending
+    ├── window_context.py       # Active app tracking + document text extraction
+    ├── email_sender.py         # SMTP email sending with retry
     ├── rag/
     │   ├── indexer.py          # Document vectorization
     │   └── searcher.py         # Semantic search
@@ -153,14 +155,40 @@ Microsoft-copilot-demo/
 Every time the user sends a message, the backend runs the following steps:
 
 ```
-1. Detect the foreground application name
-2. Capture the desktop screenshot (hide Copilot → capture → restore)
+1. Detect the previously active app (background monitor — not Electron)
+2. Extract text from the open document (PDF / Excel / CSV / Word / Pages)
+   └─ Fallback: capture desktop screenshot if no document detected
 3. Run semantic search over local documents (RAG)
-4. Call Gemini multimodal with text + screenshot + conversation history
-5. Execute the chosen action: DRAFT_CONTENT / GENERATE_IMAGE / SEND_EMAIL / SAVE_FILE
+4. Call Gemini with text + document content + conversation history
+5. Execute the chosen action:
+   DRAFT_CONTENT / GENERATE_IMAGE / SEND_EMAIL / SAVE_FILE /
+   SCHEDULE_MEETING / OPEN_APP / SEARCH_LOCAL_DOCS
 6. Stream results back to the frontend via SSE
-7. Persist the conversation to disk; auto-generate a title on the first message
+7. Persist conversation to disk; auto-generate title on first message
 ```
+
+---
+
+## Actions
+
+| Action | Trigger | Behaviour |
+|--------|---------|-----------|
+| `DRAFT_CONTENT` | Write, summarize, explain, translate | Returns formatted text response |
+| `GENERATE_IMAGE` | Create / visualize an image | Calls Gemini Image Model; result saved to disk for email attachment |
+| `SEND_EMAIL` | Send an email | Action card with editable fields; auto-attaches CV or last image |
+| `SAVE_FILE` | Save content to disk | Writes to `~/Downloads/` |
+| `SCHEDULE_MEETING` | Schedule a meeting | Generates `.ics` and opens system Calendar |
+| `OPEN_APP` | Open an application | `open -a <app>`; browser + query opens Bing search |
+| `SEARCH_LOCAL_DOCS` | Find a file | Scans Downloads / Documents / Desktop; AI ranks top 5 results |
+
+---
+
+## Privacy
+
+- **Document text** is extracted locally and sent only to the Gemini API — never stored on any server
+- **Screenshots** (fallback only) are taken in memory and discarded immediately after the API call
+- **Conversations** are stored locally at `~/.copilot/chats/` — never uploaded
+- **CV / file paths** are resolved locally; only the email body is sent via SMTP
 
 ---
 
@@ -175,4 +203,4 @@ Every time the user sends a message, the backend runs the following steps:
 | `SMTP_PORT` | `587` | SMTP port |
 | `SMTP_USER` | — | SMTP username / email address |
 | `SMTP_PASS` | — | SMTP password or app password |
-| `EXTRA_DATA_DIRS` | — | Colon-separated extra directories to scan for CV files |
+| `EXTRA_DATA_DIRS` | — | Colon-separated extra directories to scan for files |
