@@ -214,7 +214,7 @@ export default function CommandPalette() {
       } catch (_) { /* sidecar not ready */ }
     };
     poll();
-    const timer = setInterval(poll, 5000);
+    const timer = setInterval(poll, 15000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [suggestWindow]);
 

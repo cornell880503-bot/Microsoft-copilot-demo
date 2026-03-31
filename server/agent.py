@@ -402,25 +402,32 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         try:
             result = json.loads(raw)
         except json.JSONDecodeError:
-            # Self-healing: retry with an explicit re-prompt
-            yield _sse({"step": "heal", "text": "Response format error — AI is self-correcting and retrying..."})
-            logger.warning("Gemini returned non-JSON on first attempt, retrying: %s", response.text[:200])
-            retry_contents = contents + [
-                {"role": "model", "parts": [{"text": response.text}]},
-                {"role": "user", "parts": [{"text": (
-                    "Your previous response was not valid JSON. "
-                    "You MUST reply with ONLY a single valid JSON object using exactly this schema, "
-                    "no markdown, no explanation:\n"
-                    '{"thought":"...","action":"...","payload":"..."}'
-                )}]},
-            ]
-            response, _ = _generate_with_fallback(
-                client, model_name, fallback_model,
-                contents=retry_contents,
-                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
-            )
-            raw = _clean_json(response.text)
-            result = json.loads(raw)
+            raw_text = response.text
+            # Fast path: if model clearly decided EXECUTE_PYTHON but embedded code in JSON,
+            # skip the JSON battle and jump straight to code-generation step
+            if '"action": "EXECUTE_PYTHON"' in raw_text or "'action': 'EXECUTE_PYTHON'" in raw_text:
+                logger.info("Detected EXECUTE_PYTHON in malformed JSON — bypassing parse, going to code-gen")
+                result = {"thought": "Analyzing document with Python.", "action": "EXECUTE_PYTHON", "payload": "GENERATE_CODE"}
+            else:
+                # Self-healing: retry with an explicit re-prompt
+                yield _sse({"step": "heal", "text": "Response format error — AI is self-correcting and retrying..."})
+                logger.warning("Gemini returned non-JSON on first attempt, retrying: %s", raw_text[:200])
+                retry_contents = contents + [
+                    {"role": "model", "parts": [{"text": raw_text}]},
+                    {"role": "user", "parts": [{"text": (
+                        "Your previous response was not valid JSON. "
+                        "You MUST reply with ONLY a single valid JSON object using exactly this schema, "
+                        "no markdown, no explanation:\n"
+                        '{"thought":"...","action":"...","payload":"..."}'
+                    )}]},
+                ]
+                response, _ = _generate_with_fallback(
+                    client, model_name, fallback_model,
+                    contents=retry_contents,
+                    config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+                )
+                raw = _clean_json(response.text)
+                result = json.loads(raw)
 
         for key in ("thought", "action", "payload"):
             if key not in result:
