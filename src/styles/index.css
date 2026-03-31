@@ -1070,3 +1070,105 @@ html, body, #root {
   font-size: 8px;
   opacity: 0.7;
 }
+
+/* ─── File Results Card ──────────────────────────────────────────────────────── */
+.file-results-card {
+  background: #fff;
+  border: 1px solid rgba(15,108,189,0.15);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.file-results-thought {
+  font-size: 11px;
+  color: #7a8599;
+}
+
+.file-results-label {
+  font-weight: 600;
+  color: #1a2233;
+  font-size: 12px;
+}
+
+.file-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.file-result-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(0,0,0,0.07);
+  background: rgba(249,250,252,0.9);
+  transition: background 0.12s;
+}
+
+.file-result-item:hover {
+  background: rgba(15,108,189,0.05);
+  border-color: rgba(15,108,189,0.2);
+}
+
+.file-result-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.file-result-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-result-name {
+  font-weight: 600;
+  color: #1a2233;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-result-reason {
+  font-size: 10.5px;
+  color: #7a8599;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-result-actions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.file-action-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(0,0,0,0.1);
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.file-action-btn:hover {
+  background: rgba(15,108,189,0.08);
+  border-color: rgba(15,108,189,0.3);
+}
+
+.file-action-btn-email:hover {
+  background: rgba(194,57,179,0.08);
+  border-color: rgba(194,57,179,0.3);
+}

@@ -469,39 +469,40 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                         found.append(f)
 
             if found:
+                from datetime import datetime as _dt
                 found.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-                yield _sse({"step": "search", "text": f"Found {len(found)} file(s) — asking AI to identify the best match..."})
+                yield _sse({"step": "search", "text": f"Found {len(found)} file(s) — ranking by relevance..."})
 
                 file_list = "\n".join(
-                    f"- {f.name} (modified {__import__('datetime').datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d')}, path: {f})"
-                    for f in found[:20]
+                    f"{i+1}. {f.name} | modified {_dt.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d')} | {f}"
+                    for i, f in enumerate(found[:30])
                 )
                 pick_response = client.models.generate_content(
                     model=model_name,
                     contents=(
                         f"User asked: \"{user_input}\"\n\n"
-                        f"Files found on their computer:\n{file_list}\n\n"
-                        "Which file best matches what the user is looking for? "
-                        "Reply with ONLY a JSON object: "
-                        '{"path": "<full path>", "name": "<filename>", "reason": "<1 sentence>"}'
+                        f"Files found:\n{file_list}\n\n"
+                        "Return the top 3-5 most relevant files ranked by how well they match the user's request. "
+                        "Reply with ONLY valid JSON: "
+                        '{"results": [{"path": "...", "name": "...", "reason": "<short reason>"}]}'
                     ),
                 )
                 try:
                     pick = json.loads(_clean_json(pick_response.text))
                     yield _sse({
-                        "step": "result",
+                        "step": "file_results",
                         "thought": result["thought"],
-                        "action": "SEARCH_LOCAL_DOCS",
-                        "payload": f"找到：**{pick['name']}**\n\n{pick.get('reason','')}\n\n路徑：`{pick['path']}`\n\n如需寄送，請說「幫我把這個檔案寄給 XXX」。",
+                        "results": pick.get("results", []),
                     })
                 except Exception:
-                    # Fallback: just list top 5
-                    listing = "\n".join(f"- **{f.name}** (`{f}`)" for f in found[:5])
+                    # Fallback: show top 5 most recent
                     yield _sse({
-                        "step": "result",
+                        "step": "file_results",
                         "thought": result["thought"],
-                        "action": "SEARCH_LOCAL_DOCS",
-                        "payload": f"找到以下檔案（依修改時間排序）：\n\n{listing}",
+                        "results": [
+                            {"path": str(f), "name": f.name, "reason": "Most recently modified"}
+                            for f in found[:5]
+                        ],
                     })
                 return
             else:

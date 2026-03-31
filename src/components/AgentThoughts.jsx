@@ -39,7 +39,7 @@ const TYPE_STYLES = {
   heal:    { bar: '#FF8C00', label: 'HEAL'  },
 };
 
-function ThoughtEntry({ thought, onActionConfirm, onActionCancel }) {
+function ThoughtEntry({ thought, onActionConfirm, onActionCancel, onEmailFile, onOpenFile }) {
   if (thought.type === 'result') return <ResultCard thought={thought} />;
   if (thought.type === 'image') {
     return (
@@ -58,6 +58,16 @@ function ThoughtEntry({ thought, onActionConfirm, onActionCancel }) {
         payload={thought.payload}
         onConfirm={onActionConfirm}
         onCancel={onActionCancel}
+      />
+    );
+  }
+  if (thought.type === 'file_results') {
+    return (
+      <FileResultsCard
+        thought={thought.thought}
+        results={thought.results}
+        onEmailFile={onEmailFile}
+        onOpenFile={onOpenFile}
       />
     );
   }
@@ -97,7 +107,7 @@ function ResultCard({ thought }) {
    USER MODE — clean Microsoft Copilot-style chat bubbles
    ══════════════════════════════════════════════════════════════ */
 
-const USER_MODE_VISIBLE = new Set(['user', 'result', 'image', 'action_card', 'error']);
+const USER_MODE_VISIBLE = new Set(['user', 'result', 'image', 'action_card', 'file_results', 'error']);
 
 /* ── Simple markdown renderer (bold + line breaks) ───────────────────────────── */
 function MarkdownText({ text }) {
@@ -187,7 +197,7 @@ function UserBubble({ thought }) {
   );
 }
 
-function AssistantMessage({ thought, onActionConfirm, onActionCancel }) {
+function AssistantMessage({ thought, onActionConfirm, onActionCancel, onEmailFile, onOpenFile }) {
   if (thought.type === 'error') {
     return (
       <div className="um-row um-row-assistant">
@@ -222,6 +232,21 @@ function AssistantMessage({ thought, onActionConfirm, onActionCancel }) {
       </div>
     );
   }
+  if (thought.type === 'file_results') {
+    return (
+      <div className="um-row um-row-assistant">
+        <div className="um-avatar"><SparkleIcon /></div>
+        <div className="um-bubble-card">
+          <FileResultsCard
+            thought={thought.thought}
+            results={thought.results}
+            onEmailFile={onEmailFile}
+            onOpenFile={onOpenFile}
+          />
+        </div>
+      </div>
+    );
+  }
   // result — detect historical action card vs normal text
   const payload = thought.payload || '';
   const isHistoricalAction = /^\[Proposed (SEND_EMAIL|SAVE_FILE)/.test(payload)
@@ -240,10 +265,63 @@ function AssistantMessage({ thought, onActionConfirm, onActionCancel }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   FILE RESULTS CARD
+   ══════════════════════════════════════════════════════════════ */
+
+const FILE_ICONS = {
+  pdf: '📄', docx: '📝', doc: '📝', xlsx: '📊', xls: '📊',
+  csv: '📊', pptx: '📊', ppt: '📊', txt: '📃', md: '📃',
+  pages: '📝', numbers: '📊', key: '📊',
+};
+
+function fileIcon(name) {
+  const ext = (name || '').split('.').pop().toLowerCase();
+  return FILE_ICONS[ext] || '📁';
+}
+
+function FileResultsCard({ thought, results, onEmailFile, onOpenFile }) {
+  const [opened, setOpened] = React.useState({});
+  if (!results || results.length === 0) return null;
+  return (
+    <div className="file-results-card">
+      {thought && <div className="file-results-thought">💭 {thought}</div>}
+      <div className="file-results-label">Found {results.length} matching file{results.length > 1 ? 's' : ''} — select one:</div>
+      <div className="file-results-list">
+        {results.map((f, i) => (
+          <div key={i} className="file-result-item">
+            <div className="file-result-icon">{fileIcon(f.name)}</div>
+            <div className="file-result-info">
+              <div className="file-result-name">{f.name}</div>
+              {f.reason && <div className="file-result-reason">{f.reason}</div>}
+            </div>
+            <div className="file-result-actions">
+              <button
+                className="file-action-btn"
+                title="Open file"
+                onClick={() => { setOpened(o => ({...o, [i]: 'open'})); onOpenFile?.(f); }}
+              >
+                {opened[i] === 'open' ? '✓' : '📂'}
+              </button>
+              <button
+                className="file-action-btn file-action-btn-email"
+                title="Send by email"
+                onClick={() => { setOpened(o => ({...o, [i]: 'email'})); onEmailFile?.(f); }}
+              >
+                {opened[i] === 'email' ? '✓' : '📧'}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    ROOT EXPORT
    ══════════════════════════════════════════════════════════════ */
 
-export default function AgentThoughts({ thoughts, isProcessing, onActionConfirm, onActionCancel, displayMode }) {
+export default function AgentThoughts({ thoughts, isProcessing, onActionConfirm, onActionCancel, onEmailFile, onOpenFile, displayMode }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -257,7 +335,7 @@ export default function AgentThoughts({ thoughts, isProcessing, onActionConfirm,
         {visible.map((t) =>
           t.type === 'user'
             ? <UserBubble key={t.id} thought={t} />
-            : <AssistantMessage key={t.id} thought={t} onActionConfirm={onActionConfirm} onActionCancel={onActionCancel} />
+            : <AssistantMessage key={t.id} thought={t} onActionConfirm={onActionConfirm} onActionCancel={onActionCancel} onEmailFile={onEmailFile} onOpenFile={onOpenFile} />
         )}
         {isProcessing && (
           <div className="um-row um-row-assistant">
@@ -281,6 +359,8 @@ export default function AgentThoughts({ thoughts, isProcessing, onActionConfirm,
           thought={t}
           onActionConfirm={onActionConfirm}
           onActionCancel={onActionCancel}
+          onEmailFile={onEmailFile}
+          onOpenFile={onOpenFile}
         />
       ))}
       {isProcessing && (

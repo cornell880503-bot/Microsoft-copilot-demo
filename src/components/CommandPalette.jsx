@@ -342,6 +342,8 @@ export default function CommandPalette() {
             addThought({ type: 'action_card', thought, action, payload });
             const summary = typeof payload === 'object' ? JSON.stringify(payload) : String(payload);
             assistantSummary = `[Proposed ${action}: ${summary}]`;
+          } else if (step === 'file_results') {
+            addThought({ type: 'file_results', thought: event.thought, results: event.results });
           } else if (step === 'error') {
             addThought({ type: 'error', text });
           } else {
@@ -378,6 +380,22 @@ export default function CommandPalette() {
   const handleActionCancel = useCallback(() => {
     addThought({ type: 'info', text: 'Action cancelled.' });
   }, [addThought]);
+
+  const handleOpenFile = useCallback(async (file) => {
+    try {
+      await fetch(`${SIDECAR}/open-file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: file.path }),
+      });
+    } catch (e) {
+      addThought({ type: 'error', text: `Could not open file: ${e.message}` });
+    }
+  }, [addThought]);
+
+  const handleEmailFile = useCallback((file) => {
+    setQuery(`幫我把 ${file.name} 寄給`);
+  }, []);
 
   return (
     <div className="palette-shell">
@@ -421,6 +439,8 @@ export default function CommandPalette() {
               isProcessing={isProcessing}
               onActionConfirm={handleActionConfirm}
               onActionCancel={handleActionCancel}
+              onOpenFile={handleOpenFile}
+              onEmailFile={handleEmailFile}
               displayMode={displayMode}
             />
           )

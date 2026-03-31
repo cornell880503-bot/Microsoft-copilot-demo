@@ -13,6 +13,7 @@ Endpoints:
 
 import logging
 import os
+import sys
 import tempfile
 from contextlib import asynccontextmanager
 
@@ -205,6 +206,9 @@ class OpenAppRequest(BaseModel):
     app:    str
     action: str = ""
 
+class OpenFileRequest(BaseModel):
+    path: str
+
 
 @app.post("/schedule-meeting")
 async def schedule_meeting(body: ScheduleMeetingRequest):
@@ -277,6 +281,25 @@ async def open_app_endpoint(body: OpenAppRequest):
 
     logger.info("Opened app: %s (action: %s)", body.app, body.action)
     return {"ok": True, "app": body.app}
+
+
+@app.post("/open-file")
+async def open_file_endpoint(body: OpenFileRequest):
+    """Open a file with its default system application."""
+    import subprocess
+    file_path = Path(body.path).expanduser()
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {body.path}")
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["open", str(file_path)], check=True, timeout=5)
+        elif sys.platform == "linux":
+            subprocess.run(["xdg-open", str(file_path)], check=True, timeout=5)
+        else:
+            subprocess.run(["start", str(file_path)], shell=True, check=True, timeout=5)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "path": str(file_path)}
 
 
 @app.post("/agent/run")
