@@ -437,6 +437,25 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             return
 
         # ── Default result ─────────────────────────────────────────────────
+        # Special case: SEARCH_LOCAL_DOCS for cv/resume → scan filesystem
+        if action == "SEARCH_LOCAL_DOCS":
+            cv_keywords = {"cv", "resume", "curriculum vitae", "簡歷", "履歷"}
+            if any(kw in user_input.lower() for kw in cv_keywords):
+                yield _sse({"step": "search", "text": "Scanning Downloads, Documents, Desktop for CV files..."})
+                pdf_path = _find_cv_file()
+                if pdf_path:
+                    fname = Path(pdf_path).name
+                    yield _sse({"step": "search", "text": f"Found: {fname}"})
+                    yield _sse({
+                        "step": "result",
+                        "thought": result["thought"],
+                        "action": "SEARCH_LOCAL_DOCS",
+                        "payload": f"找到你的最新簡歷：**{fname}**\n\n路徑：`{pdf_path}`\n\n如需寄送，請說「幫我把簡歷寄給 XXX」。",
+                    })
+                    return
+                else:
+                    yield _sse({"step": "heal", "text": "No CV/resume PDF found in Downloads, Documents or Desktop."})
+
         yield _sse({"step": "result", **result})
 
     except json.JSONDecodeError:
