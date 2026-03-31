@@ -64,17 +64,7 @@ Action selection rules:
 IMPORTANT: Never use OPEN_APP to open a file — use SEARCH_LOCAL_DOCS to find it first, then the user will choose to open it themselves.
 IMPORTANT: When user asks to analyze/calculate data from a file (e.g. count ratios, statistics), always use EXECUTE_PYTHON — NOT DRAFT_CONTENT.
 
-For EXECUTE_PYTHON, payload is a plain Python code string that:
-- Reads the file at path: os.environ.get('DOC_PATH', '')
-- Prints results to stdout
-- Uses pandas/openpyxl/pypdf as appropriate for the file type
-- Handles the file extension automatically
-Example:
-import os, pandas as pd
-path = os.environ.get('DOC_PATH', '')
-df = pd.read_csv(path)
-counts = df['case_type'].value_counts()
-for k,v in counts.items(): print(f"{k}: {v} ({v/len(df)*100:.1f}%)")
+For EXECUTE_PYTHON, set payload to exactly the string "GENERATE_CODE" — the system will handle code generation separately.
 
 For SEND_EMAIL, structure payload as JSON string:
 {"to":"...","subject":"...","body":"...","attachment_path":null}
@@ -494,12 +484,11 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             })
             return
 
-        # ── EXECUTE_PYTHON: run AI-generated code against the active document ──
+        # ── EXECUTE_PYTHON: two-step — separate code generation call, then execute ──
         if action == "EXECUTE_PYTHON":
-            code = result["payload"] if isinstance(result["payload"], str) else str(result["payload"])
-            yield _sse({"step": "think", "text": "Running Python analysis on document..."})
+            yield _sse({"step": "think", "text": "Generating Python analysis code..."})
 
-            # If doc_path wasn't captured at query time, retry now (handles timing issue at startup)
+            # If doc_path wasn't captured at query time, retry now
             if not doc_path:
                 _, doc_path = get_active_document_content()
                 if doc_path:
@@ -509,12 +498,36 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 yield _sse({"step": "error", "text": "Could not detect an open document. Please make sure the file is open and active."})
                 return
 
+            # Step 2: dedicated code-generation call (plain text, no JSON wrapper)
+            ext = Path(doc_path).suffix.lower()
+            read_snippet = (
+                "pd.read_csv(os.environ['DOC_PATH'])" if ext == ".csv"
+                else "pd.read_excel(os.environ['DOC_PATH'])" if ext in (".xlsx", ".xls")
+                else "open(os.environ['DOC_PATH']).read()"
+            )
+            code_resp = client.models.generate_content(
+                model=model_name,
+                contents=(
+                    f"Write Python code to answer this request: {user_input}\n\n"
+                    f"File: {Path(doc_path).name} (full path in os.environ['DOC_PATH'])\n"
+                    f"Read it with: {read_snippet}\n\n"
+                    "Rules:\n"
+                    "- Import os and any needed libraries at the top\n"
+                    "- Read the file using the env var, never hardcode data\n"
+                    "- Print results clearly to stdout\n"
+                    "- Output ONLY executable Python code, no markdown, no explanation"
+                ),
+            )
+            code = code_resp.text.strip()
+            code = re.sub(r"^```python\s*", "", code)
+            code = re.sub(r"\s*```$", "", code).strip()
+
+            yield _sse({"step": "think", "text": "Running Python analysis on document..."})
             logger.info("Executing Python code (doc_path=%s):\n%s", doc_path, code[:300])
             try:
                 import subprocess as _sp
                 exec_env = os.environ.copy()
                 exec_env["DOC_PATH"] = doc_path
-                # Use the same Python interpreter running this server (has all venv packages)
                 proc = _sp.run(
                     [sys.executable, "-c", code],
                     capture_output=True, text=True, timeout=30, env=exec_env,
@@ -524,7 +537,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     output = f"⚠️ Error:\n{proc.stderr.strip()}\n\nOutput:\n{output}" if output else f"⚠️ Error:\n{proc.stderr.strip()}"
                 if not output:
                     output = "(No output produced)"
-                fname = Path(doc_path).name if doc_path else "document"
+                fname = Path(doc_path).name
                 yield _sse({
                     "step": "result",
                     "thought": result["thought"],
