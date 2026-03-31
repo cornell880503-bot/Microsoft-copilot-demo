@@ -103,30 +103,39 @@ _LAST_IMAGE_PATH = Path(tempfile.gettempdir()) / "copilot_last_image.png"
 def _find_cv_file() -> str | None:
     """
     Find the most recent CV/resume PDF by scanning known local directories.
-    Prefers files with 'cv' or 'resume' in the name, sorted by modification time.
+    First tries files with cv/resume keywords in the name; falls back to
+    the most recently modified PDF in Downloads.
     """
-    cv_keywords = {"cv", "resume", "curriculum"}
+    cv_keywords = {"cv", "resume", "curriculum", "簡歷", "履歷", "profile"}
     search_dirs = [Path.home() / "Downloads", Path.home() / "Documents", Path.home() / "Desktop"]
     extra = os.getenv("EXTRA_DATA_DIRS", "")
     for p in extra.split(":"):
         if p.strip():
             search_dirs.append(Path(p.strip()).expanduser())
 
+    # Pass 1: keyword match
     candidates = []
+    all_pdfs = []
     for folder in search_dirs:
         if not folder.exists():
             continue
         for f in folder.glob("*.pdf"):
+            all_pdfs.append(f)
             if any(kw in f.name.lower() for kw in cv_keywords):
                 candidates.append(f)
 
-    if not candidates:
-        return None
+    if candidates:
+        candidates.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        logger.info("Found CV by keyword: %s", [f.name for f in candidates[:3]])
+        return str(candidates[0])
 
-    # Return the most recently modified CV file
-    candidates.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-    logger.info("Found CV candidates: %s", [f.name for f in candidates[:3]])
-    return str(candidates[0])
+    # Pass 2: fallback — most recently modified PDF anywhere in search dirs
+    if all_pdfs:
+        all_pdfs.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        logger.info("No keyword match — falling back to most recent PDF: %s", all_pdfs[0].name)
+        return str(all_pdfs[0])
+
+    return None
 
 
 def _sse(data: dict) -> str:
