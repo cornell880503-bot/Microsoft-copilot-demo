@@ -484,14 +484,25 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         if action == "EXECUTE_PYTHON":
             code = result["payload"] if isinstance(result["payload"], str) else str(result["payload"])
             yield _sse({"step": "think", "text": "Running Python analysis on document..."})
+
+            # If doc_path wasn't captured at query time, retry now (handles timing issue at startup)
+            if not doc_path:
+                _, doc_path = get_active_document_content()
+                if doc_path:
+                    yield _sse({"step": "context", "text": f"Re-detected document: {Path(doc_path).name}"})
+
+            if not doc_path:
+                yield _sse({"step": "error", "text": "Could not detect an open document. Please make sure the file is open and active."})
+                return
+
             logger.info("Executing Python code (doc_path=%s):\n%s", doc_path, code[:300])
             try:
                 import subprocess as _sp
                 exec_env = os.environ.copy()
-                if doc_path:
-                    exec_env["DOC_PATH"] = doc_path
+                exec_env["DOC_PATH"] = doc_path
+                # Use the same Python interpreter running this server (has all venv packages)
                 proc = _sp.run(
-                    ["python3", "-c", code],
+                    [sys.executable, "-c", code],
                     capture_output=True, text=True, timeout=30, env=exec_env,
                 )
                 output = proc.stdout.strip()
