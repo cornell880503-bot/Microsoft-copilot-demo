@@ -178,9 +178,11 @@ async def generate_suggestions(active_window: str) -> list[str]:
         )
         raw = re.sub(r"^```(?:json)?\s*", "", resp.text.strip())
         raw = re.sub(r"\s*```$", "", raw).strip()
-        return json.loads(raw)[:3]
+        result = json.loads(raw)[:3]
+        logger.info("Suggestions for '%s': %s", active_window, result)
+        return result
     except Exception as e:
-        logger.warning("generate_suggestions failed: %s", e)
+        logger.warning("generate_suggestions failed for '%s': %s", active_window, e)
         return []
 
 

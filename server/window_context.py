@@ -114,8 +114,9 @@ tell application "System Events"
 end tell
 set prev to ""
 repeat with appName in visibleApps
-    if appName is not "Electron" and appName is not "loginwindow" and appName is not "Finder" then
-        set prev to appName
+    set appStr to appName as string
+    if appStr is not "Electron" and appStr is not "loginwindow" and appStr is not "Finder" then
+        set prev to appStr
         exit repeat
     end if
 end repeat
