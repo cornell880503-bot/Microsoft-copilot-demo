@@ -192,10 +192,31 @@ export default function CommandPalette() {
   const [chats, setChats]                 = useState([]);
   const [activeChatId, setActiveChatId]   = useState(null);
   const [isLoadingChat, setIsLoadingChat] = useState(false);
+  const [suggestions, setSuggestions]     = useState([]);
+  const [suggestWindow, setSuggestWindow] = useState('');
 
   const addThought = useCallback((t) => {
     setThoughts((prev) => [...prev, { id: nextId(), ...t }]);
   }, []);
+
+  // ── Proactive suggestions: poll active window every 5s ──────
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const { active_window } = await fetch(`${SIDECAR}/get-active-window`).then((r) => r.json());
+        if (cancelled || !active_window || active_window === suggestWindow) return;
+        setSuggestWindow(active_window);
+        const { suggestions: s } = await fetch(
+          `${SIDECAR}/suggest?window=${encodeURIComponent(active_window)}`
+        ).then((r) => r.json());
+        if (!cancelled) setSuggestions(s || []);
+      } catch (_) { /* sidecar not ready */ }
+    };
+    poll();
+    const timer = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [suggestWindow]);
 
   // ── Load chat list ──────────────────────────────────────────
   const refreshChatList = useCallback(async () => {
@@ -415,6 +436,21 @@ export default function CommandPalette() {
         )}
 
         <div className="palette-divider" />
+
+        {/* Proactive suggestion chips */}
+        {suggestions.length > 0 && !isProcessing && !query && (
+          <div className="suggestion-row">
+            {suggestions.map((s, i) => (
+              <button
+                key={i}
+                className="suggestion-chip"
+                onClick={() => handleSubmit(s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Input */}
         <SearchInput

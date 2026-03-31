@@ -132,6 +132,32 @@ def _clean_json(raw: str) -> str:
     return raw
 
 
+async def generate_suggestions(active_window: str) -> list[str]:
+    """Generate 2-3 proactive action suggestions based on the active window."""
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key or not active_window or active_window in ("Unknown", ""):
+        return []
+    try:
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(
+            model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL),
+            contents=(
+                f"The user is currently working in: {active_window}\n\n"
+                "Generate exactly 3 short, specific action suggestions for a Copilot AI assistant "
+                "based on what the user is likely doing in this app. "
+                "Each suggestion must be 4-8 words, start with a verb, and be directly useful. "
+                "Reply with ONLY a valid JSON array of 3 strings, no explanation:\n"
+                '["suggestion 1", "suggestion 2", "suggestion 3"]'
+            ),
+        )
+        raw = re.sub(r"^```(?:json)?\s*", "", resp.text.strip())
+        raw = re.sub(r"\s*```$", "", raw).strip()
+        return json.loads(raw)[:3]
+    except Exception as e:
+        logger.warning("generate_suggestions failed: %s", e)
+        return []
+
+
 async def generate_chat_title(user_query: str) -> str:
     """Ask Gemini for a 4-6 word chat title based on the first user message."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()

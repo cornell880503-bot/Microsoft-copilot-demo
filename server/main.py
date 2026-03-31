@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 
 import json as _json
 
-from agent import run_agent_stream, generate_chat_title
+from agent import run_agent_stream, generate_chat_title, generate_suggestions
 from email_sender import send_email
 from window_context import get_active_window_title
 from rag.indexer import index_local_data
@@ -121,6 +121,14 @@ async def get_active_window():
     if title is None:
         raise HTTPException(status_code=503, detail="Could not determine active window")
     return {"active_window": title}
+
+
+@app.get("/suggest")
+async def suggest(window: str = ""):
+    """Return 3 proactive action suggestions based on the active window."""
+    active = window or get_active_window_title() or ""
+    result = await generate_suggestions(active)
+    return {"window": active, "suggestions": result}
 
 
 @app.post("/index-docs")
