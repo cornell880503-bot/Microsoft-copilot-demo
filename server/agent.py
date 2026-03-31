@@ -526,12 +526,18 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             logger.info("Executing Python code (doc_path=%s):\n%s", doc_path, code[:300])
             try:
                 import subprocess as _sp
+                # Write to temp file to avoid -c shell escaping issues with nested quotes
+                tmp_script = Path(tempfile.mktemp(suffix=".py"))
+                tmp_script.write_text(code, encoding="utf-8")
                 exec_env = os.environ.copy()
                 exec_env["DOC_PATH"] = doc_path
-                proc = _sp.run(
-                    [sys.executable, "-c", code],
-                    capture_output=True, text=True, timeout=30, env=exec_env,
-                )
+                try:
+                    proc = _sp.run(
+                        [sys.executable, str(tmp_script)],
+                        capture_output=True, text=True, timeout=30, env=exec_env,
+                    )
+                finally:
+                    tmp_script.unlink(missing_ok=True)
                 output = proc.stdout.strip()
                 if proc.returncode != 0 and proc.stderr:
                     output = f"⚠️ Error:\n{proc.stderr.strip()}\n\nOutput:\n{output}" if output else f"⚠️ Error:\n{proc.stderr.strip()}"
