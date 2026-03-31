@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -19,11 +20,41 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+# ── Background app monitor (macOS) ───────────────────────────────────────────
+# Continuously samples the frontmost app so we always know the last
+# non-Electron app the user was in, even after Copilot steals focus.
+
+_last_user_app: str = ""
+_IGNORED = {"Electron", "loginwindow", "Finder", "Dock", "SystemUIServer", ""}
+
+def _macos_frontmost() -> str:
+    try:
+        r = subprocess.run(
+            ["osascript", "-e",
+             "tell application \"System Events\" to get name of first application process whose frontmost is true"],
+            capture_output=True, text=True, timeout=2,
+        )
+        return r.stdout.strip()
+    except Exception:
+        return ""
+
+def _background_monitor():
+    global _last_user_app
+    while True:
+        app = _macos_frontmost()
+        if app and app not in _IGNORED:
+            _last_user_app = app
+        time.sleep(1)
+
+if sys.platform == "darwin":
+    threading.Thread(target=_background_monitor, daemon=True).start()
+
+
 def _display_env() -> dict:
     """Return env dict with DISPLAY set — required for X11 tools on Linux."""
     env = os.environ.copy()
     if not env.get("DISPLAY"):
-        env["DISPLAY"] = ":99"   # default Xvfb display used by npm run dev
+        env["DISPLAY"] = ":99"
     return env
 
 
@@ -32,7 +63,8 @@ def get_active_window_title() -> Optional[str]:
     if platform == "win32":
         return _get_win32()
     elif platform == "darwin":
-        return _get_macos()
+        # Return last known user app from background monitor
+        return _last_user_app or _macos_frontmost() or None
     else:
         return _get_linux()
 
