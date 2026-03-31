@@ -15,6 +15,18 @@ const ACTION_META = {
     color: '#107C10',
     fields: ['filename', 'content'],
   },
+  SCHEDULE_MEETING: {
+    icon: '📅',
+    label: 'Schedule Meeting',
+    color: '#8661C5',
+    fields: ['title', 'attendees', 'date', 'time', 'duration_minutes', 'location'],
+  },
+  OPEN_APP: {
+    icon: '🚀',
+    label: 'Open App',
+    color: '#F7630C',
+    fields: ['app', 'action'],
+  },
 };
 
 export default function ActionCard({ thought, action, payload, onConfirm, onCancel }) {
@@ -62,6 +74,26 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
           const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
           throw new Error(err.detail || 'Failed to save file');
         }
+      } else if (action === 'SCHEDULE_MEETING') {
+        const res = await fetch(`${SIDECAR}/schedule-meeting`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fields),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          throw new Error(err.detail || 'Failed to schedule meeting');
+        }
+      } else if (action === 'OPEN_APP') {
+        const res = await fetch(`${SIDECAR}/open-app`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ app: fields.app, action: fields.action || '' }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          throw new Error(err.detail || 'Failed to open app');
+        }
       }
       setConfirmed(true);
       onConfirm?.(action, fields);
@@ -73,9 +105,11 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
   };
 
   const confirmedMessage = {
-    SEND_EMAIL: `Email sent to ${fields.to}${fields.attachment_path ? ' with attachment' : ''}`,
-    SAVE_FILE:  `File saved to ~/Downloads/${fields.filename || 'file'}`,
-  }[action] || 'Action synced to your Office workflow';
+    SEND_EMAIL:        `Email sent to ${fields.to}${fields.attachment_path ? ' with attachment' : ''}`,
+    SAVE_FILE:         `File saved to ~/Downloads/${fields.filename || 'file'}`,
+    SCHEDULE_MEETING:  `Meeting added to Calendar: ${fields.title || 'event'}`,
+    OPEN_APP:          `Opened ${fields.app}${fields.action ? ` — ${fields.action}` : ''}`,
+  }[action] || 'Action completed';
 
   if (cancelled) {
     return null;  // disappear cleanly

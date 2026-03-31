@@ -46,16 +46,18 @@ Your job is to analyze this context and choose the most useful action.
 You MUST respond with ONLY a single valid JSON object — no markdown, no explanation, no code fences:
 {
   "thought": "<1–2 sentence reasoning about what the user needs and why you chose this action>",
-  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE>",
-  "payload": "<the actual useful output: answer, drafted text, image description, email body, or file content>"
+  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | SCHEDULE_MEETING | OPEN_APP>",
+  "payload": "<the actual useful output: answer, drafted text, image description, email body, file content, or structured JSON>"
 }
 
 Action selection rules:
-- SEARCH_LOCAL_DOCS → user asks about local files, projects, or knowledge base content
-- DRAFT_CONTENT     → user wants text written, summarized, explained, or analyzed
-- GENERATE_IMAGE    → user explicitly asks to create, describe, or visualize an image
-- SEND_EMAIL        → user wants to compose and send an email to someone
-- SAVE_FILE         → user wants to save content to a file on their computer
+- SEARCH_LOCAL_DOCS  → user asks about local files, projects, or knowledge base content
+- DRAFT_CONTENT      → user wants text written, summarized, explained, or analyzed
+- GENERATE_IMAGE     → user explicitly asks to create, describe, or visualize an image
+- SEND_EMAIL         → user wants to compose and send an email to someone
+- SAVE_FILE          → user wants to save content to a file on their computer
+- SCHEDULE_MEETING   → user wants to create a calendar event or schedule a meeting
+- OPEN_APP           → user wants to open an application or perform an action in one
 
 For SEND_EMAIL, structure payload as JSON string:
 {"to":"...","subject":"...","body":"...","attachment_path":null}
@@ -64,7 +66,20 @@ CRITICAL rules for the body field:
 - NEVER mention file paths, system paths, or technical details in the body
 - NEVER ask for clarification or write meta-commentary — just write the email
 - attachment_path must always be null (the system handles attachments automatically)
-For SAVE_FILE, structure payload as JSON string: {"filename":"...","content":"..."}
+
+For SAVE_FILE, structure payload as JSON string:
+{"filename":"...","content":"..."}
+
+For SCHEDULE_MEETING, structure payload as JSON string:
+{"title":"...","attendees":"...","date":"YYYY-MM-DD","time":"HH:MM","duration_minutes":60,"location":"..."}
+- date must be a real future date in YYYY-MM-DD format
+- time must be 24-hour HH:MM format
+- attendees is a comma-separated list of names or email addresses
+
+For OPEN_APP, structure payload as JSON string:
+{"app":"...","action":"..."}
+- app is the exact macOS application name (e.g. "Google Chrome", "Spotify", "Numbers")
+- action is what to do after opening (e.g. "search for Microsoft Copilot news", or "" if just opening)
 
 Tailor your tone to the active application context.
 """
@@ -375,8 +390,8 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 })
             return
 
-        # ── Action Cards (SEND_EMAIL / SAVE_FILE) ──────────────────────────
-        if action in ("SEND_EMAIL", "SAVE_FILE"):
+        # ── Action Cards (SEND_EMAIL / SAVE_FILE / SCHEDULE_MEETING / OPEN_APP) ──
+        if action in ("SEND_EMAIL", "SAVE_FILE", "SCHEDULE_MEETING", "OPEN_APP"):
             try:
                 action_payload = json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
             except (json.JSONDecodeError, TypeError):

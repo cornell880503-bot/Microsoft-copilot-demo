@@ -15,6 +15,39 @@ An AI-powered desktop assistant built with Electron + React + Python, styled aft
 | **Multi-turn Memory** | Maintains conversation context across messages and persists chats to disk (`~/.copilot/chats/`) |
 | **Conversation Sidebar** | Create, switch, rename, and delete conversations; AI auto-generates a title from the first message |
 | **Dual UI Mode** | User Mode (clean Copilot-style chat bubbles) / Demo Mode (full agent pipeline log) |
+| **Proactive Suggestions** | Polls the active window every 5s and surfaces 3 context-aware action chips without being asked |
+| **Schedule Meeting** | Creates a `.ics` calendar event and opens it in the system Calendar app |
+| **Open App** | Launches any macOS application by name; browser actions open a search URL directly |
+| **Self-healing Errors** | RAG failures and Gemini format errors trigger automatic fallback and retry, shown as HEAL steps in Demo Mode |
+
+---
+
+## Why Microsoft Copilot — Product Differentiation
+
+This prototype demonstrates the *concept* behind Microsoft Copilot. The real competitive moat sits in four layers that no third-party AI tool can replicate:
+
+### 1. OS-Level Native Integration
+Claude Code is an app. Copilot is part of Windows itself. Through Recall and native OS APIs, Copilot can observe everything happening on the device — not as a screenshot hack, but as a first-party privileged process. This enables ambient intelligence that operates across all apps without any user setup.
+
+### 2. Microsoft Graph — Real Personal Context
+Copilot has read access to your entire Microsoft 365 identity:
+- **Outlook** — who you email, what topics, ongoing threads
+- **Teams** — meeting history, decisions made, people you work with
+- **Calendar** — your schedule, recurring events, time zone
+- **SharePoint / OneDrive** — your org's full knowledge base
+
+This is not a RAG hack over PDFs — it is a live, permissioned, org-aware knowledge graph. No external AI product has access to this.
+
+### 3. Enterprise Trust at Scale
+- Data stays within the customer's Microsoft 365 tenant — nothing leaves the enterprise boundary
+- Microsoft manages GDPR, HIPAA, SOC 2, and ISO 27001 compliance on behalf of customers
+- IT admins control exactly what Copilot can access and do — data policy, DLP, audit logs
+- This is the reason Fortune 500 companies pay for M365 Copilot rather than building their own
+
+### 4. 1.4 Billion Device Distribution
+Claude Code requires installation. Copilot ships on every Windows 11 PC by default. No AI company can buy this distribution. Every new capability MAI ships reaches over a billion potential users on day one — without an app store, without onboarding friction.
+
+> **The hard problem is not the AI model. Anyone can call an API. The hard problem is trust, context, and distribution at enterprise scale — and Microsoft already solved all three.**
 
 ---
 

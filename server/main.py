@@ -13,6 +13,7 @@ Endpoints:
 
 import logging
 import os
+import tempfile
 from contextlib import asynccontextmanager
 
 from pathlib import Path
@@ -190,6 +191,92 @@ async def save_file(body: SaveFileRequest):
     except Exception as e:
         logger.exception("Failed to save file")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class ScheduleMeetingRequest(BaseModel):
+    title:            str
+    attendees:        str = ""
+    date:             str = ""
+    time:             str = ""
+    duration_minutes: int = 60
+    location:         str = ""
+
+class OpenAppRequest(BaseModel):
+    app:    str
+    action: str = ""
+
+
+@app.post("/schedule-meeting")
+async def schedule_meeting(body: ScheduleMeetingRequest):
+    """Generate a .ics calendar file and open it in the system Calendar app."""
+    import uuid
+    import subprocess
+    from datetime import datetime, timedelta
+
+    try:
+        dt_str = f"{body.date}T{body.time or '09:00'}:00"
+        dt_start = datetime.fromisoformat(dt_str)
+    except ValueError:
+        dt_start = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
+
+    dt_end = dt_start + timedelta(minutes=body.duration_minutes or 60)
+    fmt = "%Y%m%dT%H%M%S"
+
+    attendee_lines = "\n".join(
+        f"ATTENDEE;CN={a.strip()}:mailto:{a.strip()}"
+        if "@" in a else f"ATTENDEE;CN={a.strip()}:mailto:unknown"
+        for a in body.attendees.split(",") if a.strip()
+    )
+
+    ics = (
+        "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Copilot//EN\n"
+        "BEGIN:VEVENT\n"
+        f"UID:{uuid.uuid4()}@copilot\n"
+        f"DTSTAMP:{datetime.utcnow().strftime(fmt)}Z\n"
+        f"DTSTART:{dt_start.strftime(fmt)}\n"
+        f"DTEND:{dt_end.strftime(fmt)}\n"
+        f"SUMMARY:{body.title}\n"
+        + (f"LOCATION:{body.location}\n" if body.location else "")
+        + (attendee_lines + "\n" if attendee_lines else "")
+        + "END:VEVENT\nEND:VCALENDAR"
+    )
+
+    ics_path = Path(tempfile.gettempdir()) / "copilot_meeting.ics"
+    ics_path.write_text(ics, encoding="utf-8")
+
+    try:
+        subprocess.run(["open", str(ics_path)], check=True, timeout=5)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not open Calendar: {e}")
+
+    logger.info("Meeting scheduled: %s on %s", body.title, body.date)
+    return {"ok": True, "title": body.title, "date": body.date, "time": body.time}
+
+
+@app.post("/open-app")
+async def open_app_endpoint(body: OpenAppRequest):
+    """Open a macOS application by name, optionally performing a search action."""
+    import subprocess
+    import urllib.parse
+
+    browser_apps = {"google chrome", "chrome", "safari", "firefox", "microsoft edge", "edge", "arc"}
+    app_lower = body.app.lower()
+
+    try:
+        if body.action and any(b in app_lower for b in browser_apps):
+            # Extract search terms and open a search URL
+            search_terms = body.action.lower().replace("search for", "").replace("search", "").strip()
+            url = f"https://www.bing.com/search?q={urllib.parse.quote(search_terms)}"
+            subprocess.run(["open", "-a", body.app, url], check=True, timeout=5)
+        else:
+            subprocess.run(["open", "-a", body.app], check=True, timeout=5)
+    except subprocess.CalledProcessError:
+        raise HTTPException(status_code=404, detail=f"App not found: {body.app}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    logger.info("Opened app: %s (action: %s)", body.app, body.action)
+    return {"ok": True, "app": body.app}
 
 
 @app.post("/agent/run")
