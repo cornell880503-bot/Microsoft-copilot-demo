@@ -238,7 +238,7 @@ function AssistantMessage({ thought, onActionConfirm, onActionCancel, onEmailFil
         <div className="um-avatar"><SparkleIcon /></div>
         <div className="um-bubble-card">
           <FileResultsCard
-            thought={thought.thought}
+            thought={null}
             results={thought.results}
             onEmailFile={onEmailFile}
             onOpenFile={onOpenFile}
