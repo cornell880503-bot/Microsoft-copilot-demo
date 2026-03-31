@@ -151,7 +151,77 @@ def capture_screen_base64() -> Optional[str]:
             tmp.unlink()
 
 
-# ── Windows ──────────────────────────────────────────────────────────────────
+# ── Active document text extraction ──────────────────────────────────────────
+
+_APP_DOC_SCRIPTS = {
+    "Preview":         'tell application "Preview" to get path of document 1',
+    "Adobe Acrobat":   'tell application "Adobe Acrobat" to get path of document 1',
+    "AdobeAcrobat":    'tell application "Adobe Acrobat" to get path of document 1',
+    "Microsoft Excel": 'tell application "Microsoft Excel" to get full name of active workbook',
+    "Microsoft Word":  'tell application "Microsoft Word" to get full name of active document',
+    "Microsoft PowerPoint": 'tell application "Microsoft PowerPoint" to get full name of active presentation',
+    "Numbers":         'tell application "Numbers" to get path of document 1',
+    "Pages":           'tell application "Pages" to get path of document 1',
+    "Keynote":         'tell application "Keynote" to get path of document 1',
+}
+
+def _get_document_path_from_app(app: str) -> Optional[str]:
+    script = _APP_DOC_SCRIPTS.get(app)
+    if not script:
+        return None
+    try:
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=3)
+        path = r.stdout.strip()
+        if path and Path(path).exists():
+            return path
+    except Exception:
+        pass
+    return None
+
+def _extract_text_from_file(path: str, max_chars: int = 6000) -> Optional[str]:
+    try:
+        ext = Path(path).suffix.lower()
+        if ext == ".pdf":
+            from pypdf import PdfReader
+            reader = PdfReader(path)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages[:15])
+            return text.strip()[:max_chars] or None
+        elif ext in (".xlsx", ".xls"):
+            import openpyxl
+            wb = openpyxl.load_workbook(path, data_only=True)
+            ws = wb.active
+            rows = ["\t".join(str(v) if v is not None else "" for v in row)
+                    for row in ws.iter_rows(max_row=100, values_only=True)]
+            return "\n".join(rows).strip()[:max_chars] or None
+        elif ext == ".csv":
+            return Path(path).read_text(encoding="utf-8", errors="ignore")[:max_chars]
+        elif ext in (".docx",):
+            from docx import Document
+            doc = Document(path)
+            return "\n".join(p.text for p in doc.paragraphs).strip()[:max_chars] or None
+        elif ext in (".txt", ".md"):
+            return Path(path).read_text(encoding="utf-8", errors="ignore")[:max_chars]
+    except Exception as e:
+        logger.warning("Text extraction failed for %s: %s", path, e)
+    return None
+
+def get_active_document_content() -> tuple[Optional[str], Optional[str]]:
+    """
+    Returns (doc_text, file_path) for the document open in the active app.
+    Returns (None, None) if not available or not on macOS.
+    """
+    if sys.platform != "darwin":
+        return None, None
+    app = _last_user_app
+    if not app:
+        return None, None
+    path = _get_document_path_from_app(app)
+    if not path:
+        return None, None
+    text = _extract_text_from_file(path)
+    if text:
+        logger.info("Extracted %d chars from %s (%s)", len(text), Path(path).name, app)
+    return text, path
 
 def _get_win32() -> Optional[str]:
     try:

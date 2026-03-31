@@ -23,7 +23,7 @@ from google import genai
 from google.genai import types
 
 from rag.searcher import search_docs
-from window_context import get_active_window_title, capture_screen_base64
+from window_context import get_active_window_title, capture_screen_base64, get_active_document_content
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,8 @@ async def generate_chat_title(user_query: str) -> str:
         return user_query[:48]
 
 
-def _build_user_turn(user_input: str, active_window: str, rag_results: list[dict]) -> str:
+def _build_user_turn(user_input: str, active_window: str, rag_results: list[dict],
+                     doc_text: str | None = None, doc_path: str | None = None) -> str:
     """Build the current user turn text (system prompt goes in system_instruction)."""
     rag_section = ""
     if rag_results:
@@ -215,9 +216,14 @@ def _build_user_turn(user_input: str, active_window: str, rag_results: list[dict
             for r in rag_results
         )
         rag_section = f"\n\nLocal Knowledge Base Results:\n{excerpts}"
+    doc_section = ""
+    if doc_text:
+        fname = Path(doc_path).name if doc_path else "document"
+        doc_section = f"\n\nActive Document — {fname}:\n{doc_text}"
     return (
         f"Active Application: {active_window or 'Unknown'}\n"
         f"User Query: {user_input}"
+        f"{doc_section}"
         f"{rag_section}"
     )
 
@@ -292,12 +298,20 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     active_window = get_active_window_title() or "Unknown"
     yield _sse({"step": "context", "text": f"Active window: {active_window}"})
 
-    yield _sse({"step": "context", "text": "Capturing screen content..."})
-    screen_b64 = capture_screen_base64()
-    if screen_b64:
-        yield _sse({"step": "context", "text": "Screen captured — sent to AI, not stored locally"})
+    # Try document text extraction first (accurate); fall back to screenshot
+    yield _sse({"step": "context", "text": "Reading active document content..."})
+    doc_text, doc_path = get_active_document_content()
+    screen_b64 = None
+    if doc_text:
+        fname = Path(doc_path).name if doc_path else "document"
+        yield _sse({"step": "context", "text": f"Extracted text from {fname} ({len(doc_text)} chars) — not uploaded anywhere"})
     else:
-        yield _sse({"step": "context", "text": "Screen capture unavailable — proceeding with window title only"})
+        yield _sse({"step": "context", "text": "No document detected — capturing screen..."})
+        screen_b64 = capture_screen_base64()
+        if screen_b64:
+            yield _sse({"step": "context", "text": "Screen captured — sent to AI, not stored locally"})
+        else:
+            yield _sse({"step": "context", "text": "Screen capture unavailable"})
 
     # ── Step 2: Local RAG Search ───────────────────────────────────────────
     yield _sse({"step": "search", "text": "Searching local knowledge base..."})
@@ -332,7 +346,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             contents.append({"role": role, "parts": [{"text": msg["content"]}]})
 
         # Current turn: include screenshot if available
-        user_text = _build_user_turn(user_input, active_window, rag_results)
+        user_text = _build_user_turn(user_input, active_window, rag_results, doc_text, doc_path)
         if screen_b64:
             current_parts = [
                 {"inline_data": {"mime_type": "image/png", "data": screen_b64}},

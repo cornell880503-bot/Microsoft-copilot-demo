@@ -15,6 +15,8 @@ sentence-transformers
 pypdf
 pytesseract
 Pillow
+openpyxl
+python-docx
 
 # Gemini
 google-genai
