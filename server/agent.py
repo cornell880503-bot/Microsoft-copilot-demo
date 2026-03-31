@@ -505,16 +505,24 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 else "pd.read_excel(os.environ['DOC_PATH'])" if ext in (".xlsx", ".xls")
                 else "open(os.environ['DOC_PATH']).read()"
             )
+            # Pass column names from preview so AI targets the right column
+            col_hint = ""
+            if doc_text:
+                first_line = doc_text.splitlines()[0] if doc_text else ""
+                col_hint = f"Column names (from header row): {first_line}\n"
             code_resp = client.models.generate_content(
                 model=model_name,
                 contents=(
                     f"Write Python code to answer this request: {user_input}\n\n"
                     f"File: {Path(doc_path).name} (full path in os.environ['DOC_PATH'])\n"
-                    f"Read it with: {read_snippet}\n\n"
+                    f"Read it with: {read_snippet}\n"
+                    f"{col_hint}\n"
                     "Rules:\n"
                     "- Import os and any needed libraries at the top\n"
                     "- Read the file using the env var, never hardcode data\n"
-                    "- Print results clearly to stdout\n"
+                    "- Print results in friendly, human-readable Chinese if the query is in Chinese\n"
+                    "- Use clear labels, counts AND percentages, e.g. 'majority: 26筆 (89.7%)'\n"
+                    "- NO code blocks, NO variable dumps — only clean human-readable output\n"
                     "- Output ONLY executable Python code, no markdown, no explanation"
                 ),
             )
@@ -548,7 +556,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     "step": "result",
                     "thought": result["thought"],
                     "action": "DRAFT_CONTENT",
-                    "payload": f"**Python Analysis — {fname}**\n\n```\n{output}\n```",
+                    "payload": f"**{fname} 分析結果**\n\n{output}",
                 })
             except _sp.TimeoutExpired:
                 yield _sse({"step": "error", "text": "Python execution timed out (30s limit)"})
