@@ -51,13 +51,15 @@ You MUST respond with ONLY a single valid JSON object — no markdown, no explan
 }
 
 Action selection rules:
-- SEARCH_LOCAL_DOCS  → user asks about local files, projects, or knowledge base content
+- SEARCH_LOCAL_DOCS  → user wants to find, locate, or browse files/documents on their computer — always use this when user asks to "find", "search for", "look for", or "show me" a file
 - DRAFT_CONTENT      → user wants text written, summarized, explained, or analyzed
 - GENERATE_IMAGE     → user explicitly asks to create, describe, or visualize an image
 - SEND_EMAIL         → user wants to compose and send an email to someone
 - SAVE_FILE          → user wants to save content to a file on their computer
 - SCHEDULE_MEETING   → user wants to create a calendar event or schedule a meeting
-- OPEN_APP           → user wants to open an application or perform an action in one
+- OPEN_APP           → user explicitly asks to LAUNCH a specific application by name (e.g. "open Spotify", "open Chrome"); NOT for finding files
+
+IMPORTANT: Never use OPEN_APP to open a file — use SEARCH_LOCAL_DOCS to find it first, then the user will choose to open it themselves.
 
 For SEND_EMAIL, structure payload as JSON string:
 {"to":"...","subject":"...","body":"...","attachment_path":null}
