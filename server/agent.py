@@ -28,8 +28,9 @@ from window_context import get_active_window_title, capture_screen_base64, get_a
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL       = "gemini-2.0-flash"
-IMAGE_MODEL         = "gemini-3.1-flash-image-preview"
+DEFAULT_MODEL        = "gemini-2.0-flash"
+FALLBACK_MODEL       = "gemini-2.0-flash"   # fallback when primary is overloaded
+IMAGE_MODEL          = "gemini-3.1-flash-image-preview"
 IMAGE_MODEL_FALLBACK = "gemini-2.0-flash-exp-image-generation"
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
@@ -143,6 +144,17 @@ def _find_cv_file() -> str | None:
         return str(all_pdfs[0])
 
     return None
+
+
+def _generate_with_fallback(client, primary_model: str, fallback_model: str, **kwargs):
+    """Call Gemini with automatic fallback on 503 overload errors."""
+    try:
+        return client.models.generate_content(model=primary_model, **kwargs), primary_model
+    except Exception as e:
+        if "503" in str(e) or "UNAVAILABLE" in str(e) or "overloaded" in str(e).lower():
+            logger.warning("Model %s unavailable, falling back to %s: %s", primary_model, fallback_model, e)
+            return client.models.generate_content(model=fallback_model, **kwargs), fallback_model
+        raise
 
 
 def _sse(data: dict) -> str:
@@ -377,12 +389,15 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             current_parts = [{"text": user_text}]
         contents.append({"role": "user", "parts": current_parts})
 
+        fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", FALLBACK_MODEL)
         logger.info("Sending %d-turn conversation to Gemini", len(contents))
-        response = client.models.generate_content(
-            model=model_name,
+        response, used_model = _generate_with_fallback(
+            client, model_name, fallback_model,
             contents=contents,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
         )
+        if used_model != model_name:
+            yield _sse({"step": "heal", "text": f"{model_name} overloaded — switched to {used_model}"})
         raw = _clean_json(response.text)
         try:
             result = json.loads(raw)
@@ -399,8 +414,8 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     '{"thought":"...","action":"...","payload":"..."}'
                 )}]},
             ]
-            response = client.models.generate_content(
-                model=model_name,
+            response, _ = _generate_with_fallback(
+                client, model_name, fallback_model,
                 contents=retry_contents,
                 config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
             )
@@ -510,8 +525,8 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             if doc_text:
                 preview_lines = doc_text.splitlines()[:4]  # header + 3 rows
                 col_hint = "File preview (header + first 3 rows):\n" + "\n".join(preview_lines) + "\n"
-            code_resp = client.models.generate_content(
-                model=model_name,
+            code_resp, _ = _generate_with_fallback(
+                client, model_name, fallback_model,
                 contents=(
                     f"Write Python code to answer this request: {user_input}\n\n"
                     f"File: {Path(doc_path).name} (full path in os.environ['DOC_PATH'])\n"
