@@ -554,25 +554,43 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
 
             yield _sse({"step": "think", "text": "Running Python analysis on document..."})
             logger.info("Executing Python code (doc_path=%s):\n%s", doc_path, code[:300])
-            try:
-                import subprocess as _sp
-                # Write to temp file to avoid -c shell escaping issues with nested quotes
-                tmp_script = Path(tempfile.mktemp(suffix=".py"))
-                tmp_script.write_text(code, encoding="utf-8")
+
+            def _run_code(code_str: str) -> tuple[str, int]:
+                tmp = Path(tempfile.mktemp(suffix=".py"))
+                tmp.write_text(code_str, encoding="utf-8")
                 exec_env = os.environ.copy()
                 exec_env["DOC_PATH"] = doc_path
                 try:
-                    proc = _sp.run(
-                        [sys.executable, str(tmp_script)],
+                    p = __import__("subprocess").run(
+                        [sys.executable, str(tmp)],
                         capture_output=True, text=True, timeout=30, env=exec_env,
                     )
+                    return p.stdout.strip(), p.returncode, p.stderr.strip()
                 finally:
-                    tmp_script.unlink(missing_ok=True)
-                output = proc.stdout.strip()
-                if proc.returncode != 0 and proc.stderr:
-                    output = f"⚠️ Error:\n{proc.stderr.strip()}\n\nOutput:\n{output}" if output else f"⚠️ Error:\n{proc.stderr.strip()}"
-                if not output:
-                    output = "(No output produced)"
+                    tmp.unlink(missing_ok=True)
+
+            try:
+                stdout, returncode, stderr = _run_code(code)
+
+                # Auto-fix: if code errored, send error back to AI and retry once
+                if returncode != 0 and stderr:
+                    yield _sse({"step": "heal", "text": "Code error detected — AI is fixing and retrying..."})
+                    logger.warning("Python error, requesting fix:\n%s", stderr[:300])
+                    fix_resp, _ = _generate_with_fallback(
+                        client, model_name, fallback_model,
+                        contents=(
+                            f"This Python code produced an error. Fix it and return ONLY the corrected code:\n\n"
+                            f"```python\n{code}\n```\n\n"
+                            f"Error:\n{stderr}\n\n"
+                            "Return ONLY executable Python code, no markdown, no explanation."
+                        ),
+                    )
+                    fixed = fix_resp.text.strip()
+                    fixed = re.sub(r"^```python\s*", "", fixed)
+                    fixed = re.sub(r"\s*```$", "", fixed).strip()
+                    stdout, returncode, stderr = _run_code(fixed)
+
+                output = stdout or (f"⚠️ Error:\n{stderr}" if stderr else "(No output produced)")
                 fname = Path(doc_path).name
                 yield _sse({
                     "step": "result",
@@ -580,8 +598,6 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     "action": "DRAFT_CONTENT",
                     "payload": f"**{fname} 分析結果**\n\n{output}",
                 })
-            except _sp.TimeoutExpired:
-                yield _sse({"step": "error", "text": "Python execution timed out (30s limit)"})
             except Exception as exec_err:
                 logger.error("EXECUTE_PYTHON failed: %s", exec_err)
                 yield _sse({"step": "error", "text": f"Code execution failed: {exec_err}"})
