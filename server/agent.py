@@ -564,7 +564,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 try:
                     p = __import__("subprocess").run(
                         [sys.executable, str(tmp)],
-                        capture_output=True, text=True, timeout=30, env=exec_env,
+                        capture_output=True, text=True, timeout=60, env=exec_env,
                     )
                     return p.stdout.strip(), p.returncode, p.stderr.strip()
                 finally:
