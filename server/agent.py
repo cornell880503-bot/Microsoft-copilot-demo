@@ -542,6 +542,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     "Rules:\n"
                     "- Import os and any needed libraries at the top\n"
                     "- Read the file using the env var, never hardcode data\n"
+                    "- If saving a file, ALWAYS save to os.path.expanduser('~/Downloads/'), never to /download or /Downloads\n"
                     "- Print results in friendly, human-readable Chinese if the query is in Chinese\n"
                     "- Use clear labels, counts AND percentages, e.g. 'majority: 26筆 (89.7%)'\n"
                     "- NO code blocks, NO variable dumps — only clean human-readable output\n"
