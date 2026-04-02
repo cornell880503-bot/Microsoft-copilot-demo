@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from query_normalizer import normalize_query
+
 
 @dataclass
 class Suggestion:
@@ -27,6 +29,57 @@ class Suggestion:
 class SuggestionEngine:
     def __init__(self, threshold: float = 0.6):
         self.threshold = threshold
+
+    def preset_suggestions_for_window(self, active_window: str) -> list[Suggestion]:
+        window = normalize_query(active_window)
+
+        app_presets: list[tuple[tuple[str, ...], list[Suggestion]]] = [
+            (
+                ("lark", "feishu"),
+                [
+                    Suggestion("meeting_prep", "Prepare for my next meeting", "generate_meeting_brief", 0.94, "Lark/Feishu collaboration surface detected."),
+                    Suggestion("message_summary", "Summarize my latest messages", "summarize_recent_messages", 0.88, "Messaging workflow detected."),
+                    Suggestion("reply_draft", "Draft a quick follow-up reply", "draft_client_reply", 0.84, "Collaboration app detected."),
+                ],
+            ),
+            (
+                ("calendar", "google calendar", "outlook calendar"),
+                [
+                    Suggestion("meeting_lookup", "When is my next meeting today", "lookup_next_meeting", 0.96, "Calendar surface detected."),
+                    Suggestion("meeting_prep", "Prepare for my next meeting", "generate_meeting_brief", 0.92, "Calendar surface detected."),
+                    Suggestion("agenda_summary", "Summarize today's schedule", "summarize_schedule", 0.82, "Calendar surface detected."),
+                ],
+            ),
+            (
+                ("outlook", "mail", "gmail"),
+                [
+                    Suggestion("inbox_summary", "Summarize my latest emails", "summarize_recent_messages", 0.92, "Email surface detected."),
+                    Suggestion("reply_draft", "Draft a reply to the latest email", "draft_client_reply", 0.88, "Email surface detected."),
+                    Suggestion("followup", "List follow-ups from this inbox", "extract_followups", 0.8, "Email surface detected."),
+                ],
+            ),
+            (
+                ("docs", "google docs", "word", "pages"),
+                [
+                    Suggestion("doc_summary", "Summarize this document", "summarize_active_document", 0.9, "Document editor detected."),
+                    Suggestion("rewrite", "Rewrite this more clearly", "rewrite_content", 0.84, "Document editor detected."),
+                    Suggestion("action_items", "Extract action items from this", "extract_action_items", 0.8, "Document editor detected."),
+                ],
+            ),
+            (
+                ("sheets", "excel", "numbers", "csv"),
+                [
+                    Suggestion("analysis", "Analyze this data with Python", "execute_python_analysis", 0.92, "Spreadsheet surface detected."),
+                    Suggestion("summary", "Summarize key metrics here", "summarize_metrics", 0.86, "Spreadsheet surface detected."),
+                    Suggestion("chart", "Suggest a chart for this data", "suggest_chart", 0.78, "Spreadsheet surface detected."),
+                ],
+            ),
+        ]
+
+        for aliases, suggestions in app_presets:
+            if any(alias in window for alias in aliases):
+                return suggestions[:3]
+        return []
 
     def detect_triggers(self, user_input: str, context: dict) -> list[str]:
         triggers: list[str] = []

@@ -765,14 +765,21 @@ def _clean_json(raw: str) -> str:
 
 async def generate_suggestions(active_window: str, privacy_mode: str = "safe") -> list[str]:
     """
-    Keep the frontend contract as a string array while the backend internally
-    uses structured suggestions and decision logic.
+    Keep the frontend contract as a string array.
+    Suggestions should be cheap and deterministic: use preset quick prompts
+    first, then fall back to lightweight context heuristics.
     """
     if not active_window or active_window in ("Unknown", ""):
         return []
 
     provider = ContextProvider()
     engine = SuggestionEngine()
+    preset = engine.preset_suggestions_for_window(active_window)
+    if preset:
+        result = [item.text for item in preset[:3]]
+        logger.info("Suggestions for '%s' [%s]: preset %s", active_window, privacy_mode, result)
+        return result
+
     context = provider.get_context("", active_window, None, None, [])
     triggers = engine.detect_triggers("", context)
     suggestions = engine.generate_suggestions(triggers, context)
