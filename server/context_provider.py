@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from local_calendar import fetch_upcoming_events as fetch_local_calendar_events
+from query_normalizer import normalize_query
 
 
 def _truncate(text: str, limit: int = 800) -> str:
@@ -91,7 +92,7 @@ class ContextProvider:
 
     def fetch_recent_emails(self, user_input: str, active_window: str) -> list[ContextItem]:
         lower_window = (active_window or "").lower()
-        lower_query = user_input.lower()
+        lower_query = normalize_query(user_input)
         email_app_hints = ("outlook", "mail", "gmail", "lark", "teams")
         email_query_hints = ("email", "mail", "reply", "client")
         if not any(token in lower_window for token in email_app_hints) and not any(token in lower_query for token in email_query_hints):
@@ -109,7 +110,7 @@ class ContextProvider:
 
     def fetch_upcoming_events(self, user_input: str, active_window: str) -> list[ContextItem]:
         lower_window = (active_window or "").lower()
-        lower_query = user_input.lower()
+        lower_query = normalize_query(user_input)
         calendar_app_hints = ("calendar", "lark", "outlook", "teams", "google calendar")
         calendar_query_hints = ("meeting", "calendar", "prep", "sync", "agenda")
         if not any(token in lower_window for token in calendar_app_hints) and not any(token in lower_query for token in calendar_query_hints):

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from query_normalizer import normalize_query
 
 
 class PromptBuilder:
     def select_context(self, user_input: str, context: dict) -> tuple[dict, list[str]]:
-        query = user_input.lower()
+        query = normalize_query(user_input)
 
         if "meeting" in query:
             keys = ["calendar", "documents"]
@@ -108,4 +109,3 @@ class PromptBuilder:
             for r in rag_results
         )
         return f"\n\nLocal Knowledge Base Results:\n{excerpts}"
-

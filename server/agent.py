@@ -25,8 +25,9 @@ from google.genai import types
 
 from context_provider import ContextProvider
 from memory_store import MemoryStore
-from privacy_mode import ENHANCED_MODE
+from privacy_mode import ENHANCED_MODE, load_privacy_mode
 from prompt_builder import PromptBuilder
+from query_normalizer import normalize_query
 from rag.searcher import search_docs
 from suggestion_engine import SuggestionEngine
 from window_context import get_active_window_title, capture_screen_base64, get_active_document_content
@@ -122,11 +123,12 @@ def _contains_any(text: str, patterns: tuple[str, ...]) -> bool:
 
 
 def _is_next_meeting_query(user_input: str) -> bool:
-    query = (user_input or "").lower()
+    query = normalize_query(user_input)
     patterns = (
         "next meeting",
         "my next meeting",
         "when is my next meeting",
+        "next meeting today",
         "upcoming meeting",
         "meeting time",
         "next calendar event",
@@ -140,13 +142,59 @@ def _is_next_meeting_query(user_input: str) -> bool:
     return any(pattern in query for pattern in patterns)
 
 
+def _is_calendar_factual_query(user_input: str) -> bool:
+    query = normalize_query(user_input)
+    return _contains_any(
+        query,
+        (
+            "next meeting",
+            "meeting today",
+            "when is my next meeting",
+            "what time is my meeting",
+            "meeting time",
+            "calendar event",
+            "下個會議",
+            "下一個會議",
+            "會議是幾點",
+            "今天的會議",
+        ),
+    )
+
+
+def _build_unverified_calendar_response() -> str:
+    return (
+        "I couldn't verify your next meeting from structured calendar data yet. "
+        "To answer this reliably, I need a real calendar event from the local connector. "
+        "Right now I won't guess based only on the screenshot."
+    )
+
+
+def _build_screen_inferred_calendar_prompt(normalized_user_input: str) -> str:
+    return (
+        "This is a factual calendar lookup and there is no structured calendar event available.\n"
+        "You may inspect the screenshot ONLY if you can clearly read a visible calendar or meeting entry.\n"
+        "If you infer an answer from the screen, the payload MUST begin with 'Inferred from screen context:'\n"
+        "If the screen is ambiguous, say you cannot verify the next meeting.\n\n"
+        f"User request:\n{normalized_user_input}"
+    )
+
+
+def _format_inferred_calendar_payload(payload: str) -> str:
+    text = (payload or "").strip()
+    if not text:
+        return "Inferred from screen context: I couldn't confidently read the next meeting from the screen."
+    if text.lower().startswith("inferred from screen context:"):
+        return text
+    return f"Inferred from screen context: {text}"
+
+
 def _classify_intent(user_input: str, context: dict) -> dict:
     """
     Hybrid decision layer:
     - Use deterministic routing only for high-confidence intents with strong context.
     - Otherwise defer to the LLM orchestrator.
     """
-    query = (user_input or "").strip().lower()
+    query = normalize_query(user_input)
     calendar_items = context.get("calendar", [])
     email_items = context.get("emails", [])
     document_items = context.get("documents", [])
@@ -175,7 +223,7 @@ def _classify_intent(user_input: str, context: dict) -> dict:
             "reason": "The user explicitly asked to save content to a file.",
         }
 
-    if calendar_items and _contains_any(query, ("meeting", "calendar", "schedule", "sync", "會議", "行程")):
+    if calendar_items and _contains_any(query, ("meeting", "mtg", "calendar", "schedule", "sync", "會議", "行程")):
         return {
             "intent": "calendar_related",
             "mode": "llm",
@@ -433,6 +481,8 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     memory_store = MemoryStore()
     prompt_builder = PromptBuilder()
     suggestion_engine = SuggestionEngine()
+    privacy_mode = load_privacy_mode()["mode"]
+    normalized_user_input = normalize_query(user_input)
 
     # ── Step 1: Window Context ─────────────────────────────────────────────
     yield _sse({"step": "context", "text": "Reading your active application..."})
@@ -517,6 +567,21 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             })
             return
 
+    screen_calendar_fallback = False
+    if _is_calendar_factual_query(user_input) and not context.get("calendar"):
+        if privacy_mode == ENHANCED_MODE and screen_b64:
+            screen_calendar_fallback = True
+            yield _sse({"step": "decision", "text": "Calendar fallback: no structured event found, using screen inference in Enhanced mode"})
+        else:
+            yield _sse({"step": "decision", "text": "Calendar safety gate: no structured event found, so the system will not guess from screenshot context"})
+            yield _sse({
+                "step": "result",
+                "thought": "This is a factual calendar lookup, and there is no verified calendar event available in structured context.",
+                "action": "DRAFT_CONTENT",
+                "payload": _build_unverified_calendar_response(),
+            })
+            return
+
     # ── Step 3: Gemini Decision ────────────────────────────────────────────
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
@@ -550,6 +615,8 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         else:
             yield _sse({"step": "context", "text": "Prompt using minimal context fallback"})
         user_text = prompt_bundle["augmented_prompt"]
+        if screen_calendar_fallback:
+            user_text += "\n\n" + _build_screen_inferred_calendar_prompt(normalized_user_input)
         if screen_b64:
             current_parts = [
                 {"inline_data": {"mime_type": "image/png", "data": screen_b64}},
@@ -604,6 +671,8 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 raise ValueError(f"Missing key '{key}' in Gemini response")
 
         action = result["action"]
+        if screen_calendar_fallback and action == "DRAFT_CONTENT":
+            result["payload"] = _format_inferred_calendar_payload(str(result.get("payload", "")))
         yield _sse({"step": "think", "text": f"Decision: {action}"})
 
         # ── Image Generation ───────────────────────────────────────────────
