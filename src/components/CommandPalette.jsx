@@ -464,18 +464,6 @@ export default function CommandPalette() {
               onClick={() => setDisplayMode('demo')}
             >Demo</button>
           </div>
-          <div className="mode-toggle" role="group" aria-label="Privacy mode">
-            <button
-              className={`mode-toggle-btn${privacyMode === 'safe' ? ' mode-toggle-active' : ''}`}
-              onClick={() => handlePrivacyModeChange('safe')}
-              title="Safe mode disables screenshot-based proactive suggestions"
-            >Safe</button>
-            <button
-              className={`mode-toggle-btn${privacyMode === 'enhanced' ? ' mode-toggle-active' : ''}`}
-              onClick={() => handlePrivacyModeChange('enhanced')}
-              title="Enhanced mode allows screen-derived context for proactive suggestions"
-            >Enhanced</button>
-          </div>
           <button className="close-btn" onClick={() => window.orion?.hideWindow()} aria-label="Close">✕</button>
         </div>
 
@@ -524,19 +512,6 @@ export default function CommandPalette() {
           </div>
         )}
 
-        {!isProcessing && !query && (
-          <div className="palette-footer" style={{ paddingTop: 0 }}>
-            <span>
-              Privacy: {privacyMode === 'enhanced' ? 'Enhanced' : 'Safe'}
-            </span>
-            <span>
-              {privacyMode === 'enhanced'
-                ? 'Screen context may be used for proactive suggestions'
-                : 'Proactive suggestions use low-sensitivity signals only'}
-            </span>
-          </div>
-        )}
-
         {/* Input */}
         <SearchInput
           value={query}
@@ -547,6 +522,23 @@ export default function CommandPalette() {
 
         {/* Footer */}
         <div className="palette-footer">
+          <div className="mode-toggle" role="group" aria-label="Privacy mode">
+            <button
+              className={`mode-toggle-btn${privacyMode === 'safe' ? ' mode-toggle-active' : ''}`}
+              onClick={() => handlePrivacyModeChange('safe')}
+              title="Safe mode disables screenshot-based proactive suggestions"
+            >Safe</button>
+            <button
+              className={`mode-toggle-btn${privacyMode === 'enhanced' ? ' mode-toggle-active' : ''}`}
+              onClick={() => handlePrivacyModeChange('enhanced')}
+              title="Enhanced mode allows screen-derived context for proactive suggestions"
+            >Enhanced</button>
+          </div>
+          <span>
+            {privacyMode === 'enhanced'
+              ? 'Enhanced uses screen context'
+              : 'Safe uses low-sensitivity context'}
+          </span>
           <span>↵ Send</span>
           <span>Esc Dismiss</span>
           <span>⌥ Space Toggle</span>

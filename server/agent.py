@@ -18,6 +18,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -25,6 +27,7 @@ from google import genai
 from google.genai import types
 
 from context_provider import ContextProvider
+from data_analytics import run_deterministic_analysis
 from memory_store import MemoryStore
 from privacy_mode import ENHANCED_MODE, load_privacy_mode
 from prompt_builder import PromptBuilder
@@ -37,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL        = "gemini-3-flash-preview"
 FALLBACK_MODEL       = "gemini-2.5-flash"   # fallback when primary is overloaded
+ROUTER_MODEL         = "gemini-2.5-flash"
 IMAGE_MODEL          = "gemini-3.1-flash-image-preview"
 IMAGE_MODEL_FALLBACK = "gemini-2.0-flash-exp-image-generation"
 
@@ -175,6 +179,120 @@ Return ONLY a single valid JSON object:
   "evidence": ["<up to 3 exact snippets copied from OCR text>"]
 }
 """
+
+INTENT_ROUTER_PROMPT = """\
+You are a fast intent router for a desktop Copilot system.
+
+Your job is to decide:
+1. which action the system should take
+2. whether the task needs a screenshot
+3. whether the task needs local RAG search
+
+Return ONLY a single valid JSON object:
+{
+  "action": "SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON",
+  "needs_screenshot": true,
+  "needs_rag": false,
+  "reason": "short reason"
+}
+
+Routing principles:
+- Use EXECUTE_PYTHON for spreadsheet/file analysis, counting, chart selection, metrics analysis, and structured data work.
+- Use DRAFT_CONTENT for normal writing, explanation, summarization, and interpretation.
+- Set needs_screenshot=true only when the visible screen content is likely necessary to answer correctly.
+- Set needs_rag=true only when local knowledge-base retrieval is likely relevant.
+- Prefer low-latency routing. Do not request screenshot or RAG unless they are actually useful.
+"""
+
+
+@dataclass
+class IntentPlan:
+    action: str
+    needs_screenshot: bool
+    needs_rag: bool
+    reason: str
+    source: str
+
+
+def _spreadsheet_analysis_shortcut(active_window: str, user_input: str) -> IntentPlan | None:
+    window = normalize_query(active_window)
+    query = normalize_query(user_input)
+    spreadsheet_apps = ("numbers", "excel", "sheets", "spreadsheet", "csv")
+    analysis_terms = (
+        "analyze", "analysis", "chart", "graph", "python", "count", "calculate",
+        "distribution", "breakdown", "summarize this data", "metric", "plot",
+        "分析", "計算", "圖表", "統計", "資料"
+    )
+    if any(app in window for app in spreadsheet_apps) and any(term in query for term in analysis_terms):
+        return IntentPlan(
+            action="EXECUTE_PYTHON",
+            needs_screenshot=False,
+            needs_rag=False,
+            reason="Spreadsheet analysis detected, so route directly to Python without screenshot or RAG.",
+            source="heuristic",
+        )
+    return None
+
+
+def _screen_help_shortcut(user_input: str) -> IntentPlan | None:
+    query = normalize_query(user_input)
+    screen_terms = (
+        "what is this", "what's this", "look at this", "看看這", "這在寫啥",
+        "what am i looking at", "explain this screen", "what does this say",
+    )
+    if any(term in query for term in screen_terms):
+        return IntentPlan(
+            action="DRAFT_CONTENT",
+            needs_screenshot=True,
+            needs_rag=False,
+            reason="The user is explicitly asking about visible screen content.",
+            source="heuristic",
+        )
+    return None
+
+
+def _coerce_intent_plan(payload: dict, source: str) -> IntentPlan:
+    action = str(payload.get("action", "DRAFT_CONTENT")).strip() or "DRAFT_CONTENT"
+    return IntentPlan(
+        action=action,
+        needs_screenshot=bool(payload.get("needs_screenshot")),
+        needs_rag=bool(payload.get("needs_rag")),
+        reason=str(payload.get("reason", "")).strip() or "No reason provided.",
+        source=source,
+    )
+
+
+def _route_intent_fast(active_window: str, user_input: str) -> IntentPlan:
+    shortcut = _spreadsheet_analysis_shortcut(active_window, user_input) or _screen_help_shortcut(user_input)
+    if shortcut:
+        return shortcut
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return IntentPlan(
+            action="DRAFT_CONTENT",
+            needs_screenshot=False,
+            needs_rag=False,
+            reason="No API key available, so using a minimal default route.",
+            source="fallback",
+        )
+
+    client = genai.Client(api_key=api_key)
+    router_model = os.getenv("GEMINI_ROUTER_MODEL", ROUTER_MODEL)
+    fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", FALLBACK_MODEL)
+    response, used_model = _generate_with_fallback(
+        client,
+        router_model,
+        fallback_model,
+        contents=(
+            f"Active window: {active_window or 'Unknown'}\n"
+            f"User request: {user_input}"
+        ),
+        config=types.GenerateContentConfig(system_instruction=INTENT_ROUTER_PROMPT),
+    )
+    raw = _clean_json(response.text)
+    result = json.loads(raw)
+    return _coerce_intent_plan(result, f"model:{used_model}")
 
 
 _LAST_IMAGE_PATH = Path(tempfile.gettempdir()) / "copilot_last_image.png"
@@ -521,6 +639,19 @@ def _public_thought_for_action(action: str) -> str:
     return mapping.get(action, "Processed the request using the current context.")
 
 
+def _code_attempts_package_install(code: str) -> bool:
+    lowered = (code or "").lower()
+    blocked_signals = (
+        "pip install",
+        "python -m pip",
+        "subprocess.run([\"pip\"",
+        "subprocess.run(['pip'",
+        "pip3 install",
+        "uv pip install",
+    )
+    return any(signal in lowered for signal in blocked_signals)
+
+
 def _ocr_text_has_google_calendar_signal(ocr_text: str) -> bool:
     text = normalize_query(ocr_text)
     signals = (
@@ -749,6 +880,10 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
+def _elapsed_text(start_time: float) -> str:
+    return f"Prompt completed in {time.perf_counter() - start_time:.1f}s"
+
+
 def _clean_json(raw: str) -> str:
     raw = raw.strip()
     # Strip markdown code fences
@@ -906,6 +1041,7 @@ async def _generate_image(
 
 
 async def run_agent_stream(user_input: str, history: list[dict] | None = None) -> AsyncGenerator[str, None]:
+    start_time = time.perf_counter()
     context_provider = ContextProvider()
     memory_store = MemoryStore()
     prompt_builder = PromptBuilder()
@@ -918,38 +1054,68 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     active_window = get_active_window_title() or "Unknown"
     yield _sse({"step": "context", "text": f"Active window: {active_window}"})
 
-    # Always capture the current app window for visual grounding.
-    # If a document can also be extracted structurally, keep both.
+    # ── Step 1.5: Fast Intent Router ───────────────────────────────────────
+    try:
+        intent_plan = _route_intent_fast(active_window, user_input)
+    except Exception as exc:
+        logger.warning("Fast intent router failed: %s", exc)
+        intent_plan = IntentPlan(
+            action="DRAFT_CONTENT",
+            needs_screenshot=False,
+            needs_rag=False,
+            reason="Router failed, so falling back to the default path.",
+            source="fallback",
+        )
+    yield _sse({
+        "step": "decision",
+        "text": (
+            f"Fast router: action={intent_plan.action}, "
+            f"screenshot={'yes' if intent_plan.needs_screenshot else 'no'}, "
+            f"rag={'yes' if intent_plan.needs_rag else 'no'}, "
+            f"source={intent_plan.source}"
+        ),
+    })
+    yield _sse({"step": "decision", "text": f"Fast router reason: {intent_plan.reason}"})
+
+    # Read active document context early because it can affect downstream execution,
+    # especially for spreadsheet analysis routed to Python.
     yield _sse({"step": "context", "text": "Reading active document content..."})
     doc_text, doc_path = get_active_document_content()
     screen_b64 = None
     if doc_text:
         fname = Path(doc_path).name if doc_path else "document"
         yield _sse({"step": "context", "text": f"Extracted text from {fname} ({len(doc_text)} chars) — not uploaded anywhere"})
-        yield _sse({"step": "context", "text": "Capturing current app window for visual context..."})
     else:
-        yield _sse({"step": "context", "text": "No document detected — capturing current app window..."})
+        yield _sse({"step": "context", "text": "No structured document detected in the active app"})
 
-    screen_b64 = capture_screen_base64()
-    if screen_b64:
-        approx_bytes = int(len(screen_b64) * 3 / 4)
-        yield _sse({"step": "context", "text": f"Screen capture status: success (mode={get_last_capture_mode()}, approx {approx_bytes} bytes base64-decoded) — sent to AI, not stored locally"})
+    if intent_plan.needs_screenshot:
+        yield _sse({"step": "context", "text": "Capturing current app window for visual context..."})
+        screen_b64 = capture_screen_base64()
+        if screen_b64:
+            approx_bytes = int(len(screen_b64) * 3 / 4)
+            yield _sse({"step": "context", "text": f"Screen capture status: success (mode={get_last_capture_mode()}, approx {approx_bytes} bytes base64-decoded) — sent to AI, not stored locally"})
+        else:
+            yield _sse({"step": "context", "text": "Screen capture status: unavailable"})
     else:
-        yield _sse({"step": "context", "text": "Screen capture status: unavailable"})
+        yield _sse({"step": "context", "text": "Skipping screenshot capture for this intent"})
 
     # ── Step 2: Local RAG Search ───────────────────────────────────────────
-    yield _sse({"step": "search", "text": "Searching local knowledge base..."})
-    try:
-        rag_results = search_docs(user_input, top_k=3)
-        if rag_results:
-            yield _sse({"step": "search", "text": f"Found {len(rag_results)} relevant document(s) (top score: {rag_results[0]['score']:.3f})"})
-        else:
-            yield _sse({"step": "heal", "text": "No local documents matched — AI expanding to general knowledge..."})
+    rag_results = []
+    if intent_plan.needs_rag:
+        yield _sse({"step": "search", "text": "Searching local knowledge base..."})
+        try:
+            rag_results = search_docs(user_input, top_k=3)
+            if rag_results:
+                yield _sse({"step": "search", "text": f"Found {len(rag_results)} relevant document(s) (top score: {rag_results[0]['score']:.3f})"})
+            else:
+                yield _sse({"step": "heal", "text": "No local documents matched — AI expanding to general knowledge..."})
+                rag_results = []
+        except Exception as e:
+            logger.warning("RAG search failed: %s", e)
             rag_results = []
-    except Exception as e:
-        logger.warning("RAG search failed: %s", e)
-        rag_results = []
-        yield _sse({"step": "heal", "text": "Local knowledge base unavailable — AI is falling back to general reasoning..."})
+            yield _sse({"step": "heal", "text": "Local knowledge base unavailable — AI is falling back to general reasoning..."})
+    else:
+        yield _sse({"step": "search", "text": "Skipping local knowledge-base search for this intent"})
 
     # ── Step 2.5: Context + Memory + Decision ─────────────────────────────
     context = context_provider.get_context(user_input, active_window, doc_text, doc_path, rag_results)
@@ -1026,6 +1192,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 "action": "DRAFT_CONTENT",
                 "payload": next_meeting_response,
             })
+            yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
             return
 
     screen_calendar_fallback = False
@@ -1153,6 +1320,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                         "action": "DRAFT_CONTENT",
                         "payload": _format_screen_inferred_calendar_response(screen_inferred_calendar),
                     })
+                    yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
                     return
             except Exception as exc:
                 logger.warning("Calendar screen extraction failed: %s", exc)
@@ -1171,6 +1339,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             "action": "DRAFT_CONTENT",
             "payload": _build_unverified_calendar_response(),
         })
+        yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
         return
 
     # ── Step 3: Gemini Decision ────────────────────────────────────────────
@@ -1179,7 +1348,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         yield _sse({"step": "error", "text": "GEMINI_API_KEY not set. Add it to server/.env"})
         return
 
-    model_name = os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+    model_name = os.getenv("GEMINI_EXECUTOR_MODEL", os.getenv("GEMINI_MODEL", DEFAULT_MODEL))
     yield _sse({"step": "think", "text": f"Consulting {model_name}..."})
 
     try:
@@ -1220,43 +1389,46 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
 
         fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", FALLBACK_MODEL)
         logger.info("Sending %d-turn conversation to Gemini", len(contents))
-        response, used_model = _generate_with_fallback(
-            client, model_name, fallback_model,
-            contents=contents,
-            config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
-        )
-        if used_model != model_name:
-            yield _sse({"step": "heal", "text": f"{model_name} overloaded — switched to {used_model}"})
-        raw = _clean_json(response.text)
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            raw_text = response.text
-            # Fast path: if model clearly decided EXECUTE_PYTHON but embedded code in JSON,
-            # skip the JSON battle and jump straight to code-generation step
-            if '"action": "EXECUTE_PYTHON"' in raw_text or "'action': 'EXECUTE_PYTHON'" in raw_text:
-                logger.info("Detected EXECUTE_PYTHON in malformed JSON — bypassing parse, going to code-gen")
-                result = {"thought": "Analyzing document with Python.", "action": "EXECUTE_PYTHON", "payload": "GENERATE_CODE"}
-            else:
-                # Self-healing: retry with an explicit re-prompt
-                yield _sse({"step": "heal", "text": "Response format error — AI is self-correcting and retrying..."})
-                logger.warning("Gemini returned non-JSON on first attempt, retrying: %s", raw_text[:200])
-                retry_contents = contents + [
-                    {"role": "model", "parts": [{"text": raw_text}]},
-                    {"role": "user", "parts": [{"text": (
-                        "Your previous response was not valid JSON. "
-                        "You MUST reply with ONLY a single valid JSON object using exactly this schema, "
-                        "no markdown, no explanation:\n"
-                        '{"thought":"...","action":"...","payload":"..."}'
-                    )}]},
-                ]
-                response, _ = _generate_with_fallback(
-                    client, model_name, fallback_model,
-                    contents=retry_contents,
-                    config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
-                )
-                raw = _clean_json(response.text)
+        if intent_plan.action == "EXECUTE_PYTHON":
+            result = {"thought": "Analyzing document with Python.", "action": "EXECUTE_PYTHON", "payload": "GENERATE_CODE"}
+        else:
+            response, used_model = _generate_with_fallback(
+                client, model_name, fallback_model,
+                contents=contents,
+                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+            )
+            if used_model != model_name:
+                yield _sse({"step": "heal", "text": f"{model_name} overloaded — switched to {used_model}"})
+            raw = _clean_json(response.text)
+            try:
                 result = json.loads(raw)
+            except json.JSONDecodeError:
+                raw_text = response.text
+                # Fast path: if model clearly decided EXECUTE_PYTHON but embedded code in JSON,
+                # skip the JSON battle and jump straight to code-generation step
+                if '"action": "EXECUTE_PYTHON"' in raw_text or "'action': 'EXECUTE_PYTHON'" in raw_text:
+                    logger.info("Detected EXECUTE_PYTHON in malformed JSON — bypassing parse, going to code-gen")
+                    result = {"thought": "Analyzing document with Python.", "action": "EXECUTE_PYTHON", "payload": "GENERATE_CODE"}
+                else:
+                    # Self-healing: retry with an explicit re-prompt
+                    yield _sse({"step": "heal", "text": "Response format error — AI is self-correcting and retrying..."})
+                    logger.warning("Gemini returned non-JSON on first attempt, retrying: %s", raw_text[:200])
+                    retry_contents = contents + [
+                        {"role": "model", "parts": [{"text": raw_text}]},
+                        {"role": "user", "parts": [{"text": (
+                            "Your previous response was not valid JSON. "
+                            "You MUST reply with ONLY a single valid JSON object using exactly this schema, "
+                            "no markdown, no explanation:\n"
+                            '{"thought":"...","action":"...","payload":"..."}'
+                        )}]},
+                    ]
+                    response, _ = _generate_with_fallback(
+                        client, model_name, fallback_model,
+                        contents=retry_contents,
+                        config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+                    )
+                    raw = _clean_json(response.text)
+                    result = json.loads(raw)
 
         for key in ("thought", "action", "payload"):
             if key not in result:
@@ -1290,6 +1462,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     "action": "DRAFT_CONTENT",
                     "payload": f"Image generation unavailable. Enhanced prompt:\n\n{augmented_prompt}",
                 })
+            yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
             return
 
         # ── Action Cards (SEND_EMAIL / SAVE_FILE / SCHEDULE_MEETING / OPEN_APP) ──
@@ -1336,6 +1509,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 "action": action,
                 "payload": action_payload,
             })
+            yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
             return
 
         # ── EXECUTE_PYTHON: two-step — separate code generation call, then execute ──
@@ -1350,6 +1524,24 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
 
             if not doc_path:
                 yield _sse({"step": "error", "text": "Could not detect an open document. Please make sure the file is open and active."})
+                return
+
+            # Fast path: deterministic analytics for common spreadsheet questions.
+            try:
+                deterministic = run_deterministic_analysis(doc_path, user_input)
+            except Exception as analysis_error:
+                logger.warning("Deterministic analytics failed, falling back to codegen: %s", analysis_error)
+                deterministic = None
+
+            if deterministic and deterministic.handled:
+                yield _sse({"step": "think", "text": "Using deterministic analytics path for this spreadsheet request..."})
+                yield _sse({
+                    "step": "result",
+                    "thought": "Used the built-in analytics pipeline for a faster and more stable spreadsheet analysis result.",
+                    "action": "DRAFT_CONTENT",
+                    "payload": f"**{deterministic.title} 分析結果**\n\n{deterministic.body}",
+                })
+                yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
                 return
 
             # Step 2: dedicated code-generation call (plain text, no JSON wrapper)
@@ -1374,9 +1566,12 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     "Rules:\n"
                     "- Import os and any needed libraries at the top\n"
                     "- Read the file using the env var, never hardcode data\n"
+                    "- NEVER install packages, call pip, use subprocess for package installation, or download dependencies\n"
+                    "- If a plotting library is unavailable, fall back to a textual recommendation instead of installing anything\n"
                     "- If saving a file, ALWAYS save to os.path.expanduser('~/Downloads/'), never to /download or /Downloads\n"
                     "- Print results in friendly, human-readable Chinese if the query is in Chinese\n"
                     "- Use clear labels, counts AND percentages, e.g. 'majority: 26筆 (89.7%)'\n"
+                    "- Always print a final user-facing analysis summary; do not print setup logs\n"
                     "- NO code blocks, NO variable dumps — only clean human-readable output\n"
                     "- Output ONLY executable Python code, no markdown, no explanation"
                 ),
@@ -1384,6 +1579,26 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             code = code_resp.text.strip()
             code = re.sub(r"^```python\s*", "", code)
             code = re.sub(r"\s*```$", "", code).strip()
+
+            if _code_attempts_package_install(code):
+                yield _sse({"step": "heal", "text": "Generated code tried to install packages — regenerating with stricter constraints..."})
+                regen_resp, _ = _generate_with_fallback(
+                    client, model_name, fallback_model,
+                    contents=(
+                        f"The previous Python code attempted to install packages, which is not allowed.\n\n"
+                        f"User request: {user_input}\n"
+                        f"File: {Path(doc_path).name} (full path in os.environ['DOC_PATH'])\n"
+                        f"Read it with: {read_snippet}\n"
+                        f"{col_hint}\n"
+                        "Return replacement code that does NOT install anything.\n"
+                        "If extra plotting libraries are unavailable, print a textual chart recommendation and the reason.\n"
+                        "Always print a concise final analysis summary for the user.\n"
+                        "Return ONLY executable Python code."
+                    ),
+                )
+                code = regen_resp.text.strip()
+                code = re.sub(r"^```python\s*", "", code)
+                code = re.sub(r"\s*```$", "", code).strip()
 
             yield _sse({"step": "think", "text": "Running Python analysis on document..."})
             logger.info("Executing Python code (doc_path=%s):\n%s", doc_path, code[:300])
@@ -1422,6 +1637,32 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     fixed = re.sub(r"^```python\s*", "", fixed)
                     fixed = re.sub(r"\s*```$", "", fixed).strip()
                     stdout, returncode, stderr = _run_code(fixed)
+                    code = fixed
+
+                # Auto-fix: if code runs but prints nothing, regenerate with explicit output requirements
+                if returncode == 0 and not stdout.strip():
+                    yield _sse({"step": "heal", "text": "Code ran without producing a user-facing answer — regenerating with explicit print instructions..."})
+                    logger.warning("Python code produced no stdout, requesting regenerated output:\n%s", code[:300])
+                    regen_output_resp, _ = _generate_with_fallback(
+                        client, model_name, fallback_model,
+                        contents=(
+                            f"This Python code ran successfully but produced no user-facing output.\n\n"
+                            f"```python\n{code}\n```\n\n"
+                            f"User request: {user_input}\n"
+                            f"File: {Path(doc_path).name} (full path in os.environ['DOC_PATH'])\n"
+                            f"Read it with: {read_snippet}\n"
+                            f"{col_hint}\n"
+                            "Return replacement code that MUST print a concise final answer for the user.\n"
+                            "Do not save files unless the user explicitly asked.\n"
+                            "If recommending a chart, print the recommendation and short reasoning.\n"
+                            "Return ONLY executable Python code."
+                        ),
+                    )
+                    regenerated = regen_output_resp.text.strip()
+                    regenerated = re.sub(r"^```python\s*", "", regenerated)
+                    regenerated = re.sub(r"\s*```$", "", regenerated).strip()
+                    stdout, returncode, stderr = _run_code(regenerated)
+                    code = regenerated
 
                 output = stdout or (f"⚠️ Error:\n{stderr}" if stderr else "(No output produced)")
                 fname = Path(doc_path).name
@@ -1431,6 +1672,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     "action": "DRAFT_CONTENT",
                     "payload": f"**{fname} 分析結果**\n\n{output}",
                 })
+                yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
             except Exception as exec_err:
                 logger.error("EXECUTE_PYTHON failed: %s", exec_err)
                 yield _sse({"step": "error", "text": f"Code execution failed: {exec_err}"})
@@ -1495,11 +1737,13 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                             for f in found[:5]
                         ],
                     })
+                yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
                 return
             else:
                 yield _sse({"step": "heal", "text": "No files found in Downloads, Documents or Desktop."})
 
         yield _sse({"step": "result", **result})
+        yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
 
     except json.JSONDecodeError:
         logger.error("Gemini returned non-JSON after retry: %s", response.text[:200])
@@ -1510,6 +1754,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             "action": "DRAFT_CONTENT",
             "payload": response.text,
         })
+        yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
     except Exception as e:
         logger.exception("Agent error")
         yield _sse({"step": "error", "text": f"Agent error: {e}"})

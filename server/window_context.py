@@ -10,6 +10,9 @@ import base64
 import json
 import logging
 import os
+import csv
+import math
+import re
 import subprocess
 import sys
 import tempfile
@@ -335,6 +338,268 @@ _APP_DOC_SCRIPTS = {
     "Keynote":         'tell application "Keynote" to get path of document 1',
 }
 
+
+def _extract_numbers_table() -> tuple[Optional[str], Optional[str]]:
+    """
+    Extract a meaningful Numbers table into a temporary CSV file and return
+    (preview_text, csv_path). We do not assume the data lives in active sheet
+    table 1 because real workbooks often contain charts, summary sheets, and
+    multiple tables.
+    """
+    metadata_script = """\
+tell application "Numbers"
+    if not (exists front document) then return ""
+    tell front document
+        set outLines to {}
+        try
+            set activeSheetName to name of active sheet
+        on error
+            set activeSheetName to ""
+        end try
+        repeat with sIndex from 1 to count of sheets
+            tell sheet sIndex
+                set sheetName to name
+                set isActive to sheetName is activeSheetName
+                repeat with tIndex from 1 to count of tables
+                    tell table tIndex
+                        try
+                            set tableName to name
+                        on error
+                            set tableName to ""
+                        end try
+                        set rowCount to count of rows
+                        set colCount to count of columns
+                        set end of outLines to ((sIndex as text) & tab & sheetName & tab & (tIndex as text) & tab & tableName & tab & (rowCount as text) & tab & (colCount as text) & tab & (isActive as text))
+                    end tell
+                end repeat
+            end tell
+        end repeat
+        set AppleScript's text item delimiters to linefeed
+        return outLines as text
+    end tell
+end tell
+"""
+
+    def _parse_bool(text: str) -> bool:
+        return text.strip().lower() == "true"
+
+    def _extract_candidate(sheet_index: int, table_index: int, row_count: int, col_count: int) -> list[list[str]]:
+        timeout_s = min(120, max(12, math.ceil(row_count / 700)))
+        script = f"""\
+tell application "Numbers"
+    if not (exists front document) then return ""
+    tell front document
+        tell sheet {sheet_index}
+            if (count of tables) < {table_index} then return ""
+            tell table {table_index}
+                set rowCount to count of rows
+                set rowLimit to rowCount
+                set AppleScript's text item delimiters to tab
+                set outLines to {{}}
+                repeat with r from 1 to rowLimit
+                    try
+                        set cellValues to value of every cell of row r
+                        set normalized to {{}}
+                        repeat with v in cellValues
+                            if v is missing value then
+                                set end of normalized to ""
+                            else
+                                set end of normalized to (v as text)
+                            end if
+                        end repeat
+                        set end of outLines to (normalized as text)
+                    on error
+                        set end of outLines to ""
+                    end try
+                end repeat
+                set AppleScript's text item delimiters to linefeed
+                return outLines as text
+            end tell
+        end tell
+    end tell
+end tell
+"""
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=True,
+        )
+        raw = result.stdout.strip()
+        if not raw:
+            return []
+        rows = [line.split("\t") for line in raw.splitlines()]
+        normalized_rows: list[list[str]] = []
+        width = max(col_count, max((len(row) for row in rows), default=0))
+        for row in rows:
+            normalized = [(cell or "").strip() for cell in row]
+            normalized_rows.append(normalized + ([""] * max(0, width - len(normalized))))
+        return normalized_rows
+
+    def _normalize_name(text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+    def _score_rows(rows: list[list[str]], row_count: int, col_count: int, active_sheet: bool) -> float:
+        if not rows:
+            return -1.0
+        sample = rows[: min(len(rows), 30)]
+        non_empty = sum(1 for row in sample for cell in row if cell.strip())
+        sample_cells = max(1, sum(len(row) for row in sample))
+        density = non_empty / sample_cells
+        distinct_rows = sum(1 for row in sample if sum(1 for cell in row if cell.strip()) >= 2)
+        score = min(row_count, 5000) * min(col_count, 50)
+        score += density * 250
+        score += distinct_rows * 10
+        if active_sheet:
+            score += 150
+        return score
+
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", metadata_script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        raw = result.stdout.strip()
+        if not raw:
+            return None, None
+
+        candidates: list[dict] = []
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) != 7:
+                continue
+            sheet_index, sheet_name, table_index, table_name, row_count, col_count, is_active = parts
+            try:
+                row_value = int(row_count)
+                col_value = int(col_count)
+            except ValueError:
+                continue
+            if row_value <= 0 or col_value <= 0:
+                continue
+            candidates.append(
+                {
+                    "sheet_index": int(sheet_index),
+                    "sheet_name": sheet_name,
+                    "table_index": int(table_index),
+                    "table_name": table_name or f"Table {table_index}",
+                    "row_count": row_value,
+                    "col_count": col_value,
+                    "is_active": _parse_bool(is_active),
+                }
+            )
+
+        if not candidates:
+            return None, None
+
+        export_dir = Path(tempfile.mkdtemp(prefix="copilot_numbers_export_"))
+        try:
+            export_script = f"""\
+tell application "Numbers"
+    if not (exists front document) then return ""
+    export front document to POSIX file "{export_dir}" as CSV
+    return "ok"
+end tell
+"""
+            export_result = subprocess.run(
+                ["osascript", "-e", export_script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+            )
+            if export_result.stdout.strip().lower() == "ok":
+                exported_files = list(export_dir.glob("*.csv"))
+                if exported_files:
+                    exported_by_key = {
+                        _normalize_name(file.stem): file
+                        for file in exported_files
+                    }
+                    ranked_export_candidates = sorted(
+                        candidates,
+                        key=lambda item: (item["is_active"], item["row_count"] * item["col_count"]),
+                        reverse=True,
+                    )
+                    for candidate in ranked_export_candidates:
+                        key = _normalize_name(f"{candidate['sheet_name']}-{candidate['table_name']}")
+                        exported = exported_by_key.get(key)
+                        if not exported or not exported.exists():
+                            continue
+                        preview_lines = exported.read_text(encoding="utf-8", errors="ignore").splitlines()[:8]
+                        preview = "\n".join(preview_lines)
+                        csv_path = Path(tempfile.gettempdir()) / "copilot_numbers_active.csv"
+                        csv_path.write_text(exported.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+                        logger.info(
+                            "Extracted Numbers CSV via export: sheet=%s table=%s path=%s",
+                            candidate["sheet_name"],
+                            candidate["table_name"],
+                            csv_path,
+                        )
+                        return preview, str(csv_path)
+        except Exception as exc:
+            logger.warning("Numbers CSV export fallback failed: %s", exc)
+
+        ranked_candidates: list[tuple[float, dict, list[list[str]]]] = []
+        for candidate in sorted(
+            candidates,
+            key=lambda item: (item["is_active"], item["row_count"] * item["col_count"]),
+            reverse=True,
+        )[:6]:
+            try:
+                rows = _extract_candidate(
+                    candidate["sheet_index"],
+                    candidate["table_index"],
+                    candidate["row_count"],
+                    candidate["col_count"],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Numbers candidate extraction failed for sheet=%s table=%s: %s",
+                    candidate["sheet_name"],
+                    candidate["table_name"],
+                    exc,
+                )
+                continue
+            score = _score_rows(
+                rows,
+                candidate["row_count"],
+                candidate["col_count"],
+                candidate["is_active"],
+            )
+            ranked_candidates.append((score, candidate, rows))
+
+        if not ranked_candidates:
+            return None, None
+
+        ranked_candidates.sort(key=lambda item: item[0], reverse=True)
+        best_score, best_candidate, rows = ranked_candidates[0]
+        if best_score < 0 or not rows:
+            return None, None
+
+        csv_path = Path(tempfile.gettempdir()) / "copilot_numbers_active.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerows(rows)
+
+        preview_lines = ["\t".join(row) for row in rows[:8]]
+        preview = "\n".join(preview_lines)
+        logger.info(
+            "Extracted %d rows from Numbers sheet=%s table=%s into %s",
+            len(rows),
+            best_candidate["sheet_name"],
+            best_candidate["table_name"],
+            csv_path,
+        )
+        return preview, str(csv_path)
+    except Exception as e:
+        logger.warning("Numbers extraction failed: %s", e)
+        return None, None
+
 def _get_document_path_from_app(app: str) -> Optional[str]:
     script = _APP_DOC_SCRIPTS.get(app)
     if not script:
@@ -386,6 +651,8 @@ def get_active_document_content() -> tuple[Optional[str], Optional[str]]:
     app = _last_user_app
     if not app:
         return None, None
+    if app == "Numbers":
+        return _extract_numbers_table()
     path = _get_document_path_from_app(app)
     if not path:
         return None, None

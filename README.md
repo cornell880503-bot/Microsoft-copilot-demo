@@ -92,9 +92,12 @@ The prototype demonstrates:
 
 | Feature | Description |
 |---------|-------------|
-| **Screenshot-First Context** | Captures the current app window on every request so the model always has visual grounding from the user's live workspace |
+| **Fast Intent Router** | Uses a low-latency routing stage to decide action, screenshot need, and RAG need before the heavier execution path runs |
+| **Conditional Visual Context** | Captures the current app window only when the task actually needs visual grounding, instead of forcing screenshots on every request |
 | **Document-Aware Context** | Extracts actual text from the open document (PDF, Excel, CSV, Word) and combines it with screenshot context for better reasoning |
-| **Proactive Suggestions** | Background monitor tracks the active app and surfaces context-aware action chips shortly after opening Copilot |
+| **Numbers Workbook Support** | Reads live Apple Numbers workbooks, exports the active workbook to CSV, and falls back across sheets/tables to find a usable data table |
+| **Deterministic Spreadsheet Analytics** | Handles common spreadsheet requests such as key metrics, chart suggestions, and general data analysis through fixed analytics templates instead of freeform codegen |
+| **Proactive Suggestions** | Background monitor tracks the active app and surfaces preset quick prompts and context-aware suggestions shortly after opening Copilot |
 | **Local RAG** | Indexes PDF and TXT files into a vector store and retrieves relevant content via semantic search |
 | **Calendar Screen Reading** | Uses screenshot understanding and OCR-style extraction to answer calendar questions when structured connectors are missing |
 | **Semantic File Search** | Searches files by natural language and ranks top candidates with open and email actions |
@@ -105,6 +108,8 @@ The prototype demonstrates:
 | **Multi-turn Memory** | Maintains conversation context across messages and persists chats to disk |
 | **Conversation Sidebar** | Creates, switches, renames, and deletes conversations, with auto-generated titles |
 | **Dual UI Mode** | Supports both User Mode and Demo Mode with visible agent pipeline logs |
+| **Privacy Modes** | Safe Mode keeps proactive help on low-sensitivity metadata, while Enhanced Mode allows richer screen-derived context with explicit user control |
+| **Latency Telemetry** | Shows how many seconds each completed prompt took, making routing and fallback behavior easier to debug in demo mode |
 | **Self-healing Errors** | Retries on RAG and Gemini formatting failures with visible fallback behavior |
 
 ## Why Microsoft Copilot
@@ -222,13 +227,14 @@ Every time the user sends a message, the backend runs the following steps:
 
 ```text
 1. Detect the previously active app
-2. Extract text from the open document when supported
-3. Capture the current app window for visual grounding
-4. Run semantic search over local documents
-5. Call Gemini with screenshot, document content, memory, and conversation history
-6. Execute the chosen action
-7. Stream results back to the frontend via SSE
-8. Persist conversation to disk and generate a title
+2. Run a fast router that decides the action plus whether screenshot and RAG are needed
+3. Extract text from the open document when supported
+4. Capture the current app window only if the routed intent needs visual grounding
+5. Run semantic search only if the routed intent needs local retrieval
+6. Call the execution model with the selected context, memory, and conversation history
+7. Execute the chosen action or deterministic tool path
+8. Stream results and timing back to the frontend via SSE
+9. Persist conversation to disk and generate a title
 ```
 
 ## Actions
@@ -246,18 +252,21 @@ Every time the user sends a message, the backend runs the following steps:
 ## Privacy
 
 - document text is extracted locally and sent only to the Gemini API
-- screenshots are captured for every main query and discarded after OCR / API processing
+- screenshots are captured only for intents that need visual grounding and are discarded after OCR / API processing
 - temporary screenshot files are deleted immediately after capture
 - conversations are stored locally in `~/.copilot/chats/`
 - file paths and attachments are resolved locally
+- proactive assistance supports `Safe` and `Enhanced` privacy modes in the UI
 
 ## Current Behavior Notes
 
-- the main query path is now screenshot-first: every request includes the current app window as visual context
-- when a supported document is open, the system sends both structured document text and the screenshot
+- the main query path now uses a fast router first, so screenshot capture and RAG are conditional rather than universal
+- spreadsheet-style requests in Numbers, Excel, and CSV contexts can short-circuit into deterministic analytics without freeform Python generation
+- when a supported document is open, the system sends structured document text and only adds screenshot context when the routed intent requires it
 - structured calendar data primarily comes from macOS Calendar
 - browser-based calendars such as Google Calendar and app-based calendars such as Lark currently rely on screenshot understanding rather than first-party connectors
-- demo mode shows pipeline steps, but result cards no longer expose raw model reasoning text
+- quick prompts on app open are preset by app/window type, so they do not require an extra model call
+- demo mode shows pipeline steps, prompt timing, and fallback behavior, but result cards no longer expose raw model reasoning text
 
 ## Environment Variables
 
