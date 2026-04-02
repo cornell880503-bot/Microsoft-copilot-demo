@@ -847,14 +847,19 @@ async def _generate_image(
     Returns (base64_png_or_none, augmented_prompt).
     """
     # Step 1: augment the prompt
-    aug_response = client.models.generate_content(
-        model=model_name,
+    fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", FALLBACK_MODEL)
+    aug_response, used_aug_model = _generate_with_fallback(
+        client,
+        model_name,
+        fallback_model,
         contents=IMAGE_AUGMENT_PROMPT.format(
             active_window=active_window,
             original_prompt=original_prompt,
         ),
     )
     augmented = aug_response.text.strip()
+    if used_aug_model != model_name:
+        logger.warning("Image prompt augmentation fallback: %s -> %s", model_name, used_aug_model)
     logger.info("Augmented image prompt: %s", augmented[:120])
 
     # Step 2: generate image with Gemini image model
