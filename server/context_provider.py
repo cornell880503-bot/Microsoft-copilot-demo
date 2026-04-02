@@ -51,11 +51,39 @@ class ContextProvider:
         documents = self.fetch_recent_docs(active_window, doc_text, doc_path, rag_results or [])
         emails = self.fetch_recent_emails(user_input, active_window)
         calendar = self.fetch_upcoming_events(user_input, active_window)
+        calendar_meta = self.inspect_calendar_signal(user_input, active_window, calendar)
 
         return {
             "documents": [item.to_dict() for item in documents],
             "emails": [item.to_dict() for item in emails],
             "calendar": [item.to_dict() for item in calendar],
+            "calendar_meta": calendar_meta,
+        }
+
+    def inspect_calendar_signal(
+        self,
+        user_input: str,
+        active_window: str,
+        calendar_items: list[ContextItem],
+    ) -> dict:
+        lower_window = (active_window or "").lower()
+        lower_query = normalize_query(user_input)
+        lark_hint = any(token in lower_window for token in ("lark", "feishu"))
+        calendar_hint = any(
+            token in lower_window
+            for token in ("calendar", "agenda", "schedule", "meeting", "日曆", "行事曆", "會議")
+        )
+        query_hint = any(
+            token in lower_query
+            for token in ("meeting", "calendar", "agenda", "schedule", "sync", "會議", "行程")
+        )
+        return {
+            "window_hint": lark_hint or calendar_hint,
+            "lark_hint": lark_hint,
+            "query_hint": query_hint,
+            "structured_source": "macos_calendar",
+            "structured_available": bool(calendar_items),
+            "supports_lark_connector": False,
         }
 
     def fetch_recent_docs(

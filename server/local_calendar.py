@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-_EXCLUDED_CALENDARS = {"Birthdays", "Holidays in Singapore", "Siri Suggestions"}
+_EXCLUDED_CALENDARS = {"Birthdays", "Siri Suggestions"}
 
 
 @dataclass

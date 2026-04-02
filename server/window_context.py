@@ -7,6 +7,7 @@ Cross-platform active window detection + screen capture.
 """
 
 import base64
+import json
 import logging
 import os
 import subprocess
@@ -25,9 +26,11 @@ logger = logging.getLogger(__name__)
 # non-Electron app the user was in, even after Copilot steals focus.
 
 _last_user_app: str = ""
+_last_user_window: str = ""
+_last_capture_mode: str = "unknown"
 _IGNORED = {"Electron", "loginwindow", "Finder", "Dock", "SystemUIServer", ""}
 
-def _macos_frontmost() -> str:
+def _macos_frontmost_app() -> str:
     try:
         r = subprocess.run(
             ["osascript", "-e",
@@ -37,6 +40,139 @@ def _macos_frontmost() -> str:
         return r.stdout.strip()
     except Exception:
         return ""
+
+
+def _macos_frontmost_window_title() -> str:
+    try:
+        script = """\
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    try
+        set winName to name of front window of frontApp
+    on error
+        set winName to ""
+    end try
+end tell
+return winName
+"""
+        r = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        return r.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _combine_app_window(app: str, window_title: str) -> str:
+    app = (app or "").strip()
+    window_title = (window_title or "").strip()
+    if app and window_title and window_title.lower() != app.lower():
+        return f"{app} — {window_title}"
+    return app or window_title
+
+
+def _macos_window_bounds(app: str) -> tuple[int, int, int, int] | None:
+    app = (app or "").strip()
+    if not app:
+        return None
+    script = f"""\
+tell application "System Events"
+    try
+        tell application process "{app}"
+            if (count of windows) is 0 then return ""
+            set winPos to position of front window
+            set winSize to size of front window
+            return (item 1 of winPos as text) & "," & (item 2 of winPos as text) & "," & (item 1 of winSize as text) & "," & (item 2 of winSize as text)
+        end tell
+    on error
+        return ""
+    end try
+end tell
+"""
+    try:
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=3)
+        raw = r.stdout.strip()
+        if not raw:
+            return None
+        parts = [int(float(p.strip())) for p in raw.split(",")]
+        if len(parts) != 4:
+            return None
+        x, y, w, h = parts
+        if w <= 0 or h <= 0:
+            return None
+        return x, y, w, h
+    except Exception:
+        return None
+
+
+def _macos_window_info(app: str) -> dict | None:
+    app = (app or "").strip()
+    if not app:
+        return None
+    script_path = Path(tempfile.mktemp(suffix=".swift"))
+    script_path.write_text(
+        """
+import Foundation
+import CoreGraphics
+
+guard CommandLine.arguments.count > 1 else {
+    fputs("missing app name\\n", stderr)
+    exit(1)
+}
+
+let targetApp = CommandLine.arguments[1]
+let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+
+var best: [String: Any]? = nil
+var bestArea: Double = -1
+
+for window in windowList {
+    guard let owner = window[kCGWindowOwnerName as String] as? String, owner == targetApp else { continue }
+    let layer = window[kCGWindowLayer as String] as? Int ?? 0
+    if layer != 0 { continue }
+    guard let bounds = window[kCGWindowBounds as String] as? [String: Any] else { continue }
+    let width = bounds["Width"] as? Double ?? 0
+    let height = bounds["Height"] as? Double ?? 0
+    let area = width * height
+    if area > bestArea {
+        bestArea = area
+        best = [
+            "window_id": window[kCGWindowNumber as String] as Any,
+            "x": bounds["X"] as Any,
+            "y": bounds["Y"] as Any,
+            "width": width,
+            "height": height
+        ]
+    }
+}
+
+guard let output = best else {
+    print("")
+    exit(0)
+}
+
+let data = try JSONSerialization.data(withJSONObject: output, options: [])
+print(String(data: data, encoding: .utf8) ?? "")
+""",
+        encoding="utf-8",
+    )
+    try:
+        result = subprocess.run(
+            ["swift", str(script_path), app],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=True,
+        )
+        raw = result.stdout.strip()
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+    finally:
+        script_path.unlink(missing_ok=True)
 
 def _macos_first_visible_non_electron() -> str:
     """Return the first visible non-Electron app — used at startup."""
@@ -61,11 +197,12 @@ return prev
         return ""
 
 def _background_monitor():
-    global _last_user_app
+    global _last_user_app, _last_user_window
     while True:
-        app = _macos_frontmost()
+        app = _macos_frontmost_app()
         if app and app not in _IGNORED:
             _last_user_app = app
+            _last_user_window = _combine_app_window(app, _macos_frontmost_window_title())
         time.sleep(1)
 
 if sys.platform == "darwin":
@@ -73,7 +210,8 @@ if sys.platform == "darwin":
     _initial = _macos_first_visible_non_electron()
     if _initial:
         _last_user_app = _initial
-        logger.info("Initial user app: %s", _initial)
+        _last_user_window = _combine_app_window(_initial, _macos_frontmost_window_title())
+        logger.info("Initial user app: %s", _last_user_window)
     threading.Thread(target=_background_monitor, daemon=True).start()
 
 
@@ -90,34 +228,63 @@ def get_active_window_title() -> Optional[str]:
     if platform == "win32":
         return _get_win32()
     elif platform == "darwin":
-        # Return last known user app from background monitor
-        return _last_user_app or _macos_frontmost() or None
+        # Return last known user-facing window description from background monitor
+        current_app = _last_user_app or _macos_frontmost_app()
+        current_window = _last_user_window or _combine_app_window(current_app, _macos_frontmost_window_title())
+        return current_window or current_app or None
     else:
         return _get_linux()
 
 
+def get_last_capture_mode() -> str:
+    return _last_capture_mode
+
+
 def capture_screen_base64() -> Optional[str]:
     """
-    Capture the full screen and return as base64-encoded PNG.
+    Capture the target app window when possible and return as base64-encoded PNG.
+    Falls back to full-screen capture if window bounds are unavailable.
     Returns None if screen capture is unavailable.
     """
     platform = sys.platform
     tmp = Path(tempfile.mktemp(suffix=".png"))
+    global _last_capture_mode
+    _last_capture_mode = "unknown"
     try:
         if platform == "darwin":
-            # Hide Electron window so background app is fully visible
-            subprocess.run(
-                ["osascript", "-e", 'tell application "Electron" to set visible to false'],
-                timeout=3, capture_output=True,
-            )
-            time.sleep(0.6)
+            target_app = _last_user_app or _macos_frontmost_app()
+            window_info = _macos_window_info(target_app)
+            bounds = _macos_window_bounds(target_app)
             try:
-                subprocess.run(
-                    ["screencapture", "-x", "-t", "png", str(tmp)],
-                    check=True, timeout=5, capture_output=True,
-                )
+                if window_info and window_info.get("window_id"):
+                    window_id = str(window_info["window_id"])
+                    subprocess.run(
+                        ["screencapture", "-x", "-l", window_id, "-t", "png", str(tmp)],
+                        check=True, timeout=5, capture_output=True,
+                    )
+                    _last_capture_mode = "app-window"
+                    logger.info("Captured app window by window id for %s: window_id=%s", target_app, window_id)
+                elif bounds:
+                    x, y, w, h = bounds
+                    subprocess.run(
+                        ["osascript", "-e", 'tell application "Electron" to set visible to false'],
+                        timeout=3, capture_output=True,
+                    )
+                    time.sleep(0.2)
+                    subprocess.run(
+                        ["screencapture", "-x", "-R", f"{x},{y},{w},{h}", "-t", "png", str(tmp)],
+                        check=True, timeout=5, capture_output=True,
+                    )
+                    _last_capture_mode = "app-window"
+                    logger.info("Captured app window region for %s: x=%s y=%s w=%s h=%s", target_app, x, y, w, h)
+                else:
+                    subprocess.run(
+                        ["screencapture", "-x", "-t", "png", str(tmp)],
+                        check=True, timeout=5, capture_output=True,
+                    )
+                    _last_capture_mode = "full-screen"
+                    logger.info("Captured full screen because window bounds were unavailable for %s", target_app or "<unknown>")
             finally:
-                # Always restore the window
                 subprocess.run(
                     ["osascript", "-e", 'tell application "Electron" to set visible to true'],
                     timeout=3, capture_output=True,
@@ -128,16 +295,19 @@ def capture_screen_base64() -> Optional[str]:
                 subprocess.run(
                     ["scrot", str(tmp)], check=True, timeout=5, capture_output=True, env=env
                 )
+                _last_capture_mode = "full-screen"
             except FileNotFoundError:
                 subprocess.run(
                     ["gnome-screenshot", "-f", str(tmp)],
                     check=True, timeout=5, capture_output=True, env=env,
                 )
+                _last_capture_mode = "full-screen"
         else:
             # Windows: use PIL if available
             from PIL import ImageGrab
             img = ImageGrab.grab()
             img.save(str(tmp), "PNG")
+            _last_capture_mode = "full-screen"
 
         data = tmp.read_bytes()
         logger.info("Screen captured: %d bytes", len(data))

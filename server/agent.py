@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -30,7 +31,7 @@ from prompt_builder import PromptBuilder
 from query_normalizer import normalize_query
 from rag.searcher import search_docs
 from suggestion_engine import SuggestionEngine
-from window_context import get_active_window_title, capture_screen_base64, get_active_document_content
+from window_context import get_active_window_title, capture_screen_base64, get_active_document_content, get_last_capture_mode
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,67 @@ Create an enhanced, detailed image generation prompt that:
 Respond with ONLY the enhanced prompt text, no explanation.
 """
 
+CALENDAR_SCREEN_EXTRACT_PROMPT = """\
+You are validating a calendar screenshot for a factual schedule lookup.
+
+You MUST extract only what is clearly visible on the screen.
+Do NOT guess from partial text, icons, layout, or world knowledge.
+Do NOT add holidays, festivals, or events unless they are explicitly visible.
+If you cannot clearly verify both an event label and its time/date, return status="unverified".
+
+Return ONLY a single valid JSON object:
+{
+  "status": "verified" | "unverified",
+  "source": "screen_inferred_calendar",
+  "answer": "<short answer for the user, only if verified>",
+  "event_title": "<visible title or empty string>",
+  "event_time": "<visible date/time text or empty string>",
+  "evidence": ["<up to 3 short visible snippets from the screenshot>"]
+}
+"""
+
+CALENDAR_SCREEN_WITH_OCR_HINT_PROMPT = """\
+You are validating a calendar screenshot for a factual schedule lookup.
+
+You will receive:
+- a calendar screenshot
+- OCR text extracted from that same screenshot
+
+Use the OCR text as a hint for where to look, but only answer from details that are actually visible in the screenshot.
+Do NOT guess from browser chrome, tabs, or unrelated UI.
+Do NOT add holidays, festivals, or events unless they are explicitly visible.
+Only return status="verified" when the screenshot clearly shows a matching event title and time/date.
+
+Return ONLY a single valid JSON object:
+{
+  "status": "verified" | "unverified",
+  "source": "screen_inferred_calendar",
+  "answer": "<short answer for the user, only if verified>",
+  "event_title": "<visible title or empty string>",
+  "event_time": "<visible date/time text or empty string>",
+  "evidence": ["<up to 3 short visible snippets from the screenshot>"]
+}
+"""
+
+CALENDAR_OCR_EXTRACT_PROMPT = """\
+You are validating OCR text extracted from a calendar screenshot for a factual schedule lookup.
+
+Use ONLY the OCR text provided below.
+Do NOT guess missing words, dates, or holidays.
+Do NOT use world knowledge.
+Only return status="verified" when the OCR text clearly contains a matching event title and time/date.
+
+Return ONLY a single valid JSON object:
+{
+  "status": "verified" | "unverified",
+  "source": "ocr_screen_calendar",
+  "answer": "<short answer for the user, only if verified>",
+  "event_title": "<visible title or empty string>",
+  "event_time": "<visible date/time text or empty string>",
+  "evidence": ["<up to 3 exact snippets copied from OCR text>"]
+}
+"""
+
 
 _LAST_IMAGE_PATH = Path(tempfile.gettempdir()) / "copilot_last_image.png"
 
@@ -161,20 +223,192 @@ def _is_calendar_factual_query(user_input: str) -> bool:
     )
 
 
+def _window_looks_calendar_related(active_window: str) -> bool:
+    lower_window = (active_window or "").lower()
+    return _contains_any(
+        lower_window,
+        (
+            "calendar",
+            "google calendar",
+            "outlook calendar",
+            "lark calendar",
+            "feishu calendar",
+            "agenda",
+            "schedule",
+            "meeting",
+            "日曆",
+            "行事曆",
+            "會議",
+        ),
+    )
+
+
+def _is_temporal_schedule_query(user_input: str) -> bool:
+    query = normalize_query(user_input)
+    return _contains_any(
+        query,
+        (
+            "what will happen",
+            "what's happening",
+            "what is happening",
+            "what do i have",
+            "what is on my calendar",
+            "what's on my calendar",
+            "schedule tomorrow",
+            "schedule today",
+            "tomorrow",
+            "tmrw",
+            "tmr",
+            "today",
+            "next",
+            "upcoming",
+            "later today",
+            "明天",
+            "今天",
+            "等一下",
+            "接下來",
+            "待會",
+        ),
+    )
+
+
+def _requires_verified_calendar_data(user_input: str, active_window: str) -> bool:
+    return _is_calendar_factual_query(user_input) or (
+        _window_looks_calendar_related(active_window) and _is_temporal_schedule_query(user_input)
+    )
+
+
 def _build_unverified_calendar_response() -> str:
     return (
-        "I couldn't verify your next meeting from structured calendar data yet. "
-        "To answer this reliably, I need a real calendar event from the local connector. "
-        "Right now I won't guess based only on the screenshot."
+        "I couldn't verify that from structured calendar data yet. "
+        "This build only treats local macOS Calendar events as verified calendar data, "
+        "and it will not answer calendar facts from screenshots alone."
     )
+
+
+def _format_screen_inferred_calendar_response(extraction: dict) -> str:
+    answer = str(extraction.get("answer", "")).strip()
+    event_title = str(extraction.get("event_title", "")).strip()
+    event_time = str(extraction.get("event_time", "")).strip()
+    evidence = extraction.get("evidence") or []
+    evidence = [str(item).strip() for item in evidence if str(item).strip()]
+
+    lines = []
+    if answer:
+        lines.append(f"Inferred from calendar screen: {answer}")
+    else:
+        parts = []
+        if event_title:
+            parts.append(f"event \"{event_title}\"")
+        if event_time:
+            parts.append(f"time {event_time}")
+        if parts:
+            lines.append("Inferred from calendar screen: " + ", ".join(parts))
+        else:
+            lines.append("Inferred from calendar screen: A calendar event appears visible, but the details are limited.")
+
+    if evidence:
+        lines.append("")
+        lines.append("Visible evidence:")
+        for item in evidence[:3]:
+            lines.append(f"- {item}")
+    return "\n".join(lines)
+
+
+def _ocr_screen_text_via_vision(screen_b64: str) -> str:
+    raw_bytes = base64.b64decode(screen_b64)
+    image_path = Path(tempfile.mktemp(suffix=".png"))
+    script_path = Path(tempfile.mktemp(suffix=".swift"))
+    image_path.write_bytes(raw_bytes)
+    script_path.write_text(
+        """
+import AppKit
+import Vision
+import Foundation
+
+guard CommandLine.arguments.count > 1 else {
+    fputs("missing image path\\n", stderr)
+    exit(1)
+}
+
+let imageURL = URL(fileURLWithPath: CommandLine.arguments[1])
+guard let nsImage = NSImage(contentsOf: imageURL) else {
+    fputs("could not load image\\n", stderr)
+    exit(2)
+}
+
+var rect = NSRect(origin: .zero, size: nsImage.size)
+guard let cgImage = nsImage.cgImage(forProposedRect: &rect, context: nil, hints: nil) else {
+    fputs("could not decode cgImage\\n", stderr)
+    exit(3)
+}
+
+let request = VNRecognizeTextRequest()
+request.recognitionLevel = .accurate
+request.usesLanguageCorrection = true
+request.recognitionLanguages = ["en-US", "zh-Hans", "zh-Hant"]
+
+let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+try handler.perform([request])
+
+let observations = (request.results ?? []).compactMap { observation -> String? in
+    guard let candidate = observation.topCandidates(1).first else { return nil }
+    return candidate.string
+}
+
+print(observations.joined(separator: "\\n"))
+""",
+        encoding="utf-8",
+    )
+    try:
+        result = subprocess.run(
+            ["swift", str(script_path), str(image_path)],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=True,
+        )
+        return result.stdout.strip()
+    finally:
+        image_path.unlink(missing_ok=True)
+        script_path.unlink(missing_ok=True)
+
+
+def _extract_calendar_from_ocr_text(
+    client: genai.Client,
+    model_name: str,
+    fallback_model: str,
+    user_input: str,
+    active_window: str,
+    ocr_text: str,
+) -> dict:
+    response, _ = _generate_with_fallback(
+        client,
+        model_name,
+        fallback_model,
+        contents=(
+            f"Active window: {active_window or 'Unknown'}\n"
+            f"User request: {user_input}\n\n"
+            f"OCR text from the calendar screenshot:\n{ocr_text}"
+        ),
+        config=types.GenerateContentConfig(system_instruction=CALENDAR_OCR_EXTRACT_PROMPT),
+    )
+    raw = _clean_json(response.text)
+    result = json.loads(raw)
+    if result.get("status") not in {"verified", "unverified"}:
+        result["status"] = "unverified"
+    return result
 
 
 def _build_screen_inferred_calendar_prompt(normalized_user_input: str) -> str:
     return (
         "This is a factual calendar lookup and there is no structured calendar event available.\n"
         "You may inspect the screenshot ONLY if you can clearly read a visible calendar or meeting entry.\n"
+        "Do NOT guess from icons, layout, or partial text.\n"
+        "Do NOT infer a meeting from unrelated browser tabs or generic productivity UIs.\n"
         "If you infer an answer from the screen, the payload MUST begin with 'Inferred from screen context:'\n"
-        "If the screen is ambiguous, say you cannot verify the next meeting.\n\n"
+        "If the screen is ambiguous, say you cannot verify the next meeting.\n"
+        "Confidence threshold: only answer when the meeting title and time are both clearly visible.\n\n"
         f"User request:\n{normalized_user_input}"
     )
 
@@ -186,6 +420,175 @@ def _format_inferred_calendar_payload(payload: str) -> str:
     if text.lower().startswith("inferred from screen context:"):
         return text
     return f"Inferred from screen context: {text}"
+
+
+def _screen_calendar_fallback_allowed(active_window: str) -> bool:
+    lower_window = (active_window or "").lower()
+    calendar_window_hints = (
+        "calendar",
+        "google calendar",
+        "outlook calendar",
+        "lark calendar",
+        "feishu calendar",
+        "schedule",
+        "agenda",
+        "meeting",
+        "行事曆",
+        "日曆",
+        "會議",
+    )
+    return any(token in lower_window for token in calendar_window_hints)
+
+
+def _structured_calendar_items(context: dict) -> list[dict]:
+    return [
+        item for item in (context.get("calendar", []) or [])
+        if item.get("source") == "local_calendar"
+    ]
+
+
+def _looks_like_lark_calendar_surface(active_window: str, screen_b64: str | None) -> bool:
+    lower_window = (active_window or "").lower()
+    if any(token in lower_window for token in ("lark", "feishu", "calendar", "agenda", "schedule", "meeting")):
+        return True
+    return bool(screen_b64)
+
+
+def _ocr_text_looks_calendar_related(ocr_text: str) -> bool:
+    text = normalize_query(ocr_text)
+    positive = (
+        "calendar",
+        "agenda",
+        "meeting",
+        "schedule",
+        "today",
+        "tomorrow",
+        "am",
+        "pm",
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "may",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "oct",
+        "nov",
+        "dec",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+        "日曆",
+        "行事曆",
+        "會議",
+        "今天",
+        "明天",
+    )
+    negative = ("electron", "file", "edit", "view", "window", "help")
+    return any(token in text for token in positive) and not all(token in text for token in negative)
+
+
+def _screen_calendar_result_is_credible(result: dict) -> bool:
+    if result.get("status") != "verified":
+        return False
+    title = str(result.get("event_title", "")).strip()
+    event_time = str(result.get("event_time", "")).strip()
+    evidence = [str(item).strip() for item in (result.get("evidence") or []) if str(item).strip()]
+    if not title or not event_time:
+        return False
+    if len(title) < 4 or len(event_time) < 3:
+        return False
+    return len(evidence) >= 1
+
+
+def _ocr_text_has_google_calendar_signal(ocr_text: str) -> bool:
+    text = normalize_query(ocr_text)
+    signals = (
+        "calendar.google.com",
+        "google calendar",
+        "/week",
+        "/day",
+        "/month",
+        "today",
+        "week",
+        "month",
+    )
+    return any(token in text for token in signals)
+
+
+def _extract_calendar_from_screen(
+    client: genai.Client,
+    model_name: str,
+    fallback_model: str,
+    screen_b64: str,
+    user_input: str,
+    active_window: str,
+) -> dict:
+    contents = [{
+        "role": "user",
+        "parts": [
+            {"inline_data": {"mime_type": "image/png", "data": screen_b64}},
+            {"text": (
+                f"Active window: {active_window or 'Unknown'}\n"
+                f"User request: {user_input}\n"
+                "Extract only clearly visible calendar information."
+            )},
+        ],
+    }]
+    response, _ = _generate_with_fallback(
+        client,
+        model_name,
+        fallback_model,
+        contents=contents,
+        config=types.GenerateContentConfig(system_instruction=CALENDAR_SCREEN_EXTRACT_PROMPT),
+    )
+    raw = _clean_json(response.text)
+    result = json.loads(raw)
+    if result.get("status") not in {"verified", "unverified"}:
+        result["status"] = "unverified"
+    return result
+
+
+def _extract_calendar_from_screen_with_ocr_hint(
+    client: genai.Client,
+    model_name: str,
+    fallback_model: str,
+    screen_b64: str,
+    user_input: str,
+    active_window: str,
+    ocr_text: str,
+) -> dict:
+    contents = [{
+        "role": "user",
+        "parts": [
+            {"inline_data": {"mime_type": "image/png", "data": screen_b64}},
+            {"text": (
+                f"Active window: {active_window or 'Unknown'}\n"
+                f"User request: {user_input}\n\n"
+                "OCR text hint from the same screenshot:\n"
+                f"{ocr_text[:4000]}\n\n"
+                "Focus on the calendar content area, not the browser toolbar or tabs."
+            )},
+        ],
+    }]
+    response, _ = _generate_with_fallback(
+        client,
+        model_name,
+        fallback_model,
+        contents=contents,
+        config=types.GenerateContentConfig(system_instruction=CALENDAR_SCREEN_WITH_OCR_HINT_PROMPT),
+    )
+    raw = _clean_json(response.text)
+    result = json.loads(raw)
+    if result.get("status") not in {"verified", "unverified"}:
+        result["status"] = "unverified"
+    return result
 
 
 def _classify_intent(user_input: str, context: dict) -> dict:
@@ -489,20 +892,24 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     active_window = get_active_window_title() or "Unknown"
     yield _sse({"step": "context", "text": f"Active window: {active_window}"})
 
-    # Try document text extraction first (accurate); fall back to screenshot
+    # Always capture the current app window for visual grounding.
+    # If a document can also be extracted structurally, keep both.
     yield _sse({"step": "context", "text": "Reading active document content..."})
     doc_text, doc_path = get_active_document_content()
     screen_b64 = None
     if doc_text:
         fname = Path(doc_path).name if doc_path else "document"
         yield _sse({"step": "context", "text": f"Extracted text from {fname} ({len(doc_text)} chars) — not uploaded anywhere"})
+        yield _sse({"step": "context", "text": "Capturing current app window for visual context..."})
     else:
-        yield _sse({"step": "context", "text": "No document detected — capturing screen..."})
-        screen_b64 = capture_screen_base64()
-        if screen_b64:
-            yield _sse({"step": "context", "text": "Screen captured — sent to AI, not stored locally"})
-        else:
-            yield _sse({"step": "context", "text": "Screen capture unavailable"})
+        yield _sse({"step": "context", "text": "No document detected — capturing current app window..."})
+
+    screen_b64 = capture_screen_base64()
+    if screen_b64:
+        approx_bytes = int(len(screen_b64) * 3 / 4)
+        yield _sse({"step": "context", "text": f"Screen capture status: success (mode={get_last_capture_mode()}, approx {approx_bytes} bytes base64-decoded) — sent to AI, not stored locally"})
+    else:
+        yield _sse({"step": "context", "text": "Screen capture status: unavailable"})
 
     # ── Step 2: Local RAG Search ───────────────────────────────────────────
     yield _sse({"step": "search", "text": "Searching local knowledge base..."})
@@ -520,8 +927,36 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
 
     # ── Step 2.5: Context + Memory + Decision ─────────────────────────────
     context = context_provider.get_context(user_input, active_window, doc_text, doc_path, rag_results)
-    context_counts = {key: len(value) for key, value in context.items()}
-    yield _sse({"step": "context", "text": f"Context loaded: docs={context_counts['documents']}, emails={context_counts['emails']}, calendar={context_counts['calendar']}"})
+    structured_calendar = _structured_calendar_items(context)
+    calendar_meta = context.get("calendar_meta", {}) or {}
+    yield _sse({
+        "step": "context",
+        "text": (
+            "Context loaded: "
+            f"docs={len(context.get('documents', []) or [])}, "
+            f"emails={len(context.get('emails', []) or [])}, "
+            f"structured_calendar={len(structured_calendar)}"
+        ),
+    })
+    yield _sse({
+        "step": "context",
+        "text": (
+            "Calendar connector status: "
+            f"structured_source={calendar_meta.get('structured_source', 'unknown')}, "
+            f"lark_connector={'yes' if calendar_meta.get('supports_lark_connector') else 'no'}, "
+            f"window_hint={'yes' if calendar_meta.get('window_hint') else 'no'}, "
+            f"lark_hint={'yes' if calendar_meta.get('lark_hint') else 'no'}"
+        ),
+    })
+    yield _sse({
+        "step": "context",
+        "text": "Structured calendar filters: excluding Birthdays and Siri Suggestions; holiday calendars are included.",
+    })
+    if calendar_meta.get("lark_hint") and not structured_calendar:
+        yield _sse({
+            "step": "context",
+            "text": "Calendar note: the active window looks Lark-related, but this build does not have a Lark Calendar connector. Structured calendar data currently comes from macOS Calendar only.",
+        })
 
     memory_updates = memory_store.maybe_update_from_user_input(user_input)
     memory = memory_store.get_preferences()
@@ -553,7 +988,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     })
 
     if intent["mode"] == "deterministic" and intent["intent"] == "next_meeting_lookup":
-        next_meeting_response = _format_next_meeting_response(context.get("calendar", []))
+        next_meeting_response = _format_next_meeting_response(structured_calendar)
         if next_meeting_response:
             yield _sse({"step": "decision", "text": "Hybrid routing: answering directly from calendar context"})
             yield _sse({
@@ -568,19 +1003,149 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             return
 
     screen_calendar_fallback = False
-    if _is_calendar_factual_query(user_input) and not context.get("calendar"):
-        if privacy_mode == ENHANCED_MODE and screen_b64:
-            screen_calendar_fallback = True
-            yield _sse({"step": "decision", "text": "Calendar fallback: no structured event found, using screen inference in Enhanced mode"})
-        else:
-            yield _sse({"step": "decision", "text": "Calendar safety gate: no structured event found, so the system will not guess from screenshot context"})
+    screen_inferred_calendar = None
+    if _requires_verified_calendar_data(user_input, active_window) and not structured_calendar:
+        calendar_window_ok = _screen_calendar_fallback_allowed(active_window)
+        yield _sse({
+            "step": "decision",
+            "text": (
+                "Calendar fallback eligibility: "
+                f"privacy_mode={privacy_mode}, "
+                f"screen_capture={'yes' if bool(screen_b64) else 'no'}, "
+                f"calendar_window_hint={'yes' if calendar_window_ok else 'no'}"
+            ),
+        })
+        if privacy_mode == ENHANCED_MODE and screen_b64 and _looks_like_lark_calendar_surface(active_window, screen_b64):
             yield _sse({
-                "step": "result",
-                "thought": "This is a factual calendar lookup, and there is no verified calendar event available in structured context.",
-                "action": "DRAFT_CONTENT",
-                "payload": _build_unverified_calendar_response(),
+                "step": "decision",
+                "text": "Calendar fallback: no structured event found, so the system is attempting a dedicated screen extractor. It will only answer if the OCR preview or active window looks calendar-related, and any answer will be labeled as screen-inferred.",
             })
-            return
+            api_key = os.getenv("GEMINI_API_KEY", "").strip()
+            if not api_key:
+                yield _sse({"step": "error", "text": "GEMINI_API_KEY not set. Add it to server/.env"})
+                return
+            model_name = os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+            fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", FALLBACK_MODEL)
+            client = genai.Client(api_key=api_key)
+            try:
+                ocr_text = ""
+                try:
+                    yield _sse({"step": "think", "text": "OCR extractor: reading calendar text from the screenshot with macOS Vision..."})
+                    ocr_text = _ocr_screen_text_via_vision(screen_b64)
+                except Exception as exc:
+                    logger.warning("Calendar OCR failed: %s", exc)
+                    yield _sse({"step": "heal", "text": f"OCR extractor failed: {str(exc)[:180]}. Falling back to direct image extraction."})
+
+                if ocr_text.strip():
+                    ocr_preview = " | ".join(line.strip() for line in ocr_text.splitlines()[:8] if line.strip())[:500] or "none"
+                    yield _sse({
+                        "step": "context",
+                        "text": f"OCR extractor result: {len(ocr_text.splitlines())} lines detected; preview={ocr_preview}",
+                    })
+                    if calendar_window_ok or _ocr_text_looks_calendar_related(ocr_text):
+                        yield _sse({"step": "think", "text": f"OCR parser: validating extracted calendar text with {model_name}..."})
+                        screen_inferred_calendar = _extract_calendar_from_ocr_text(
+                            client=client,
+                            model_name=model_name,
+                            fallback_model=fallback_model,
+                            user_input=user_input,
+                            active_window=active_window,
+                            ocr_text=ocr_text,
+                        )
+                        if (
+                            screen_inferred_calendar.get("status") != "verified"
+                            and _ocr_text_has_google_calendar_signal(ocr_text)
+                        ):
+                            yield _sse({
+                                "step": "think",
+                                "text": "OCR parser could not verify the event, so the system is running a second pass over the screenshot using the OCR text as a hint.",
+                            })
+                            screen_inferred_calendar = _extract_calendar_from_screen_with_ocr_hint(
+                                client=client,
+                                model_name=model_name,
+                                fallback_model=fallback_model,
+                                screen_b64=screen_b64,
+                                user_input=user_input,
+                                active_window=active_window,
+                                ocr_text=ocr_text,
+                            )
+                        if screen_inferred_calendar.get("status") != "verified":
+                            yield _sse({
+                                "step": "think",
+                                "text": "OCR parser did not verify a result, so the system is falling back to direct screenshot interpretation.",
+                            })
+                            screen_inferred_calendar = _extract_calendar_from_screen_with_ocr_hint(
+                                client=client,
+                                model_name=model_name,
+                                fallback_model=fallback_model,
+                                screen_b64=screen_b64,
+                                user_input=user_input,
+                                active_window=active_window,
+                                ocr_text=ocr_text,
+                            )
+                    else:
+                        yield _sse({
+                            "step": "think",
+                            "text": "OCR preview is noisy, so the system is skipping OCR parsing and using direct screenshot interpretation instead.",
+                        })
+                        screen_inferred_calendar = _extract_calendar_from_screen(
+                            client=client,
+                            model_name=model_name,
+                            fallback_model=fallback_model,
+                            screen_b64=screen_b64,
+                            user_input=user_input,
+                            active_window=active_window,
+                        )
+                else:
+                    yield _sse({"step": "think", "text": f"Screen extractor: validating visible calendar details with {model_name}..."})
+                    screen_inferred_calendar = _extract_calendar_from_screen(
+                        client=client,
+                        model_name=model_name,
+                        fallback_model=fallback_model,
+                        screen_b64=screen_b64,
+                        user_input=user_input,
+                        active_window=active_window,
+                    )
+
+                evidence = screen_inferred_calendar.get("evidence") or []
+                evidence_text = " | ".join(str(item).strip() for item in evidence[:3] if str(item).strip()) or "none"
+                yield _sse({
+                    "step": "context",
+                    "text": (
+                        "Screen extractor result: "
+                        f"status={screen_inferred_calendar.get('status', 'unverified')}, "
+                        f"source={screen_inferred_calendar.get('source', 'unknown')}, "
+                        f"event_title={screen_inferred_calendar.get('event_title', '') or '<empty>'}, "
+                        f"event_time={screen_inferred_calendar.get('event_time', '') or '<empty>'}, "
+                        f"evidence={evidence_text}"
+                    ),
+                })
+                if screen_inferred_calendar and screen_inferred_calendar.get("status") == "verified":
+                    yield _sse({
+                        "step": "result",
+                        "thought": "No structured calendar connector matched, so the system answered from the screenshot and labeled the result as inferred.",
+                        "action": "DRAFT_CONTENT",
+                        "payload": _format_screen_inferred_calendar_response(screen_inferred_calendar),
+                    })
+                    return
+            except Exception as exc:
+                logger.warning("Calendar screen extraction failed: %s", exc)
+                yield _sse({
+                    "step": "heal",
+                    "text": "Calendar screen extractor could not verify visible meeting details.",
+                })
+
+        yield _sse({
+            "step": "decision",
+            "text": "Calendar safety gate: even after screenshot interpretation, the system could not produce a calendar answer for this turn.",
+        })
+        yield _sse({
+            "step": "result",
+            "thought": "This request needs verified calendar data, and no structured calendar event is available.",
+            "action": "DRAFT_CONTENT",
+            "payload": _build_unverified_calendar_response(),
+        })
+        return
 
     # ── Step 3: Gemini Decision ────────────────────────────────────────────
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -616,6 +1181,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             yield _sse({"step": "context", "text": "Prompt using minimal context fallback"})
         user_text = prompt_bundle["augmented_prompt"]
         if screen_calendar_fallback:
+            yield _sse({"step": "context", "text": "Calendar screen inference enabled for this turn: the screenshot is being provided to the model as fallback evidence"})
             user_text += "\n\n" + _build_screen_inferred_calendar_prompt(normalized_user_input)
         if screen_b64:
             current_parts = [
