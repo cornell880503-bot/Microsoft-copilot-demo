@@ -94,6 +94,10 @@ For OPEN_APP, structure payload as JSON string:
 - action is what to do after opening (e.g. "search for Microsoft Copilot news", or "" if just opening)
 
 Tailor your tone to the active application context.
+
+If the user's request asks about their next meeting, meeting time, meeting schedule, or upcoming calendar event,
+and calendar context is available, answer with DRAFT_CONTENT using the calendar context directly.
+Do NOT use SEARCH_LOCAL_DOCS for calendar questions.
 """
 
 IMAGE_AUGMENT_PROMPT = """\
@@ -110,6 +114,49 @@ Respond with ONLY the enhanced prompt text, no explanation.
 
 
 _LAST_IMAGE_PATH = Path(tempfile.gettempdir()) / "copilot_last_image.png"
+
+
+def _is_next_meeting_query(user_input: str) -> bool:
+    query = (user_input or "").lower()
+    patterns = (
+        "next meeting",
+        "my next meeting",
+        "when is my next meeting",
+        "upcoming meeting",
+        "meeting time",
+        "next calendar event",
+        "下個會議",
+        "下一個會議",
+        "我的下一個會議",
+        "下個 meeting",
+        "會議是幾點",
+        "下一場會議",
+    )
+    return any(pattern in query for pattern in patterns)
+
+
+def _format_next_meeting_response(calendar_items: list[dict]) -> str | None:
+    if not calendar_items:
+        return None
+
+    next_item = calendar_items[0]
+    title = next_item.get("title", "Upcoming meeting")
+    summary = next_item.get("summary", "")
+    timestamp = next_item.get("timestamp")
+    metadata = next_item.get("metadata") or {}
+    starts_in = metadata.get("starts_in_minutes")
+    attendees = metadata.get("attendees") or []
+
+    lines = [f"Your next meeting is **{title}**."]
+    if timestamp:
+        lines.append(f"Start time: {timestamp}")
+    if starts_in is not None:
+        lines.append(f"It starts in about {starts_in} minutes.")
+    if attendees:
+        lines.append(f"Attendees: {', '.join(attendees)}")
+    if summary:
+        lines.append(f"Context: {summary}")
+    return "\n".join(lines)
 
 
 def _find_cv_file() -> str | None:
@@ -345,6 +392,18 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             "mode": decision_mode,
             "suggestions": [item.to_dict() for item in structured_suggestions],
         })
+
+    if _is_next_meeting_query(user_input):
+        next_meeting_response = _format_next_meeting_response(context.get("calendar", []))
+        if next_meeting_response:
+            yield _sse({"step": "decision", "text": "Calendar shortcut: answering from meeting context"})
+            yield _sse({
+                "step": "result",
+                "thought": "Calendar context already contains the next meeting details, so a direct answer is more useful than another tool call.",
+                "action": "DRAFT_CONTENT",
+                "payload": next_meeting_response,
+            })
+            return
 
     # ── Step 3: Gemini Decision ────────────────────────────────────────────
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
