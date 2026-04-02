@@ -25,6 +25,7 @@ from google.genai import types
 
 from context_provider import ContextProvider
 from memory_store import MemoryStore
+from privacy_mode import ENHANCED_MODE
 from prompt_builder import PromptBuilder
 from rag.searcher import search_docs
 from suggestion_engine import SuggestionEngine
@@ -116,6 +117,10 @@ Respond with ONLY the enhanced prompt text, no explanation.
 _LAST_IMAGE_PATH = Path(tempfile.gettempdir()) / "copilot_last_image.png"
 
 
+def _contains_any(text: str, patterns: tuple[str, ...]) -> bool:
+    return any(pattern in text for pattern in patterns)
+
+
 def _is_next_meeting_query(user_input: str) -> bool:
     query = (user_input or "").lower()
     patterns = (
@@ -133,6 +138,73 @@ def _is_next_meeting_query(user_input: str) -> bool:
         "下一場會議",
     )
     return any(pattern in query for pattern in patterns)
+
+
+def _classify_intent(user_input: str, context: dict) -> dict:
+    """
+    Hybrid decision layer:
+    - Use deterministic routing only for high-confidence intents with strong context.
+    - Otherwise defer to the LLM orchestrator.
+    """
+    query = (user_input or "").strip().lower()
+    calendar_items = context.get("calendar", [])
+    email_items = context.get("emails", [])
+    document_items = context.get("documents", [])
+
+    if _is_next_meeting_query(user_input) and calendar_items:
+        return {
+            "intent": "next_meeting_lookup",
+            "mode": "deterministic",
+            "confidence": 0.96,
+            "reason": "The user explicitly asked about their next meeting and calendar context is available.",
+        }
+
+    if _contains_any(query, ("delete memory", "forget this preference", "清除記憶", "刪除記憶")):
+        return {
+            "intent": "memory_management",
+            "mode": "deterministic",
+            "confidence": 0.93,
+            "reason": "The user explicitly asked to manage stored memory.",
+        }
+
+    if _contains_any(query, ("save this as", "save to file", "另存", "存成檔案")):
+        return {
+            "intent": "save_file",
+            "mode": "deterministic",
+            "confidence": 0.88,
+            "reason": "The user explicitly asked to save content to a file.",
+        }
+
+    if calendar_items and _contains_any(query, ("meeting", "calendar", "schedule", "sync", "會議", "行程")):
+        return {
+            "intent": "calendar_related",
+            "mode": "llm",
+            "confidence": 0.72,
+            "reason": "Calendar context is relevant, but the exact action still benefits from model judgment.",
+        }
+
+    if email_items and _contains_any(query, ("email", "reply", "mail", "client", "寄信", "回信")):
+        return {
+            "intent": "email_related",
+            "mode": "llm",
+            "confidence": 0.72,
+            "reason": "Email context is relevant, but drafting versus summarizing should still be decided by the model.",
+        }
+
+    if document_items:
+        return {
+            "intent": "document_related",
+            "mode": "llm",
+            "confidence": 0.64,
+            "reason": "Document context exists, but the user intent is not explicit enough for deterministic routing.",
+        }
+
+    return {
+        "intent": "general",
+        "mode": "llm",
+        "confidence": 0.45,
+        "reason": "No high-confidence deterministic route matched, so the model should decide.",
+    }
 
 
 def _format_next_meeting_response(calendar_items: list[dict]) -> str | None:
@@ -226,7 +298,7 @@ def _clean_json(raw: str) -> str:
     return raw
 
 
-async def generate_suggestions(active_window: str) -> list[str]:
+async def generate_suggestions(active_window: str, privacy_mode: str = "safe") -> list[str]:
     """
     Keep the frontend contract as a string array while the backend internally
     uses structured suggestions and decision logic.
@@ -236,11 +308,23 @@ async def generate_suggestions(active_window: str) -> list[str]:
 
     provider = ContextProvider()
     engine = SuggestionEngine()
-    context = provider.get_context("", active_window, None, None, [])
+    screen_signal = None
+    if privacy_mode == ENHANCED_MODE:
+        screen_signal = capture_screen_base64()
+    synthetic_query = ""
+    if privacy_mode == ENHANCED_MODE and screen_signal:
+        lower_window = active_window.lower()
+        if "lark" in lower_window:
+            synthetic_query = "meeting calendar agenda"
+        elif "outlook" in lower_window:
+            synthetic_query = "email calendar follow up"
+        elif "calendar" in lower_window:
+            synthetic_query = "meeting calendar"
+    context = provider.get_context(synthetic_query, active_window, None, None, [])
     triggers = engine.detect_triggers("", context)
     suggestions = engine.generate_suggestions(triggers, context)
     result = [item.text for item in suggestions]
-    logger.info("Suggestions for '%s': %s", active_window, result)
+    logger.info("Suggestions for '%s' [%s]: %s", active_window, privacy_mode, result)
     return result
 
 
@@ -393,13 +477,25 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             "suggestions": [item.to_dict() for item in structured_suggestions],
         })
 
-    if _is_next_meeting_query(user_input):
+    intent = _classify_intent(user_input, context)
+    yield _sse({
+        "step": "decision",
+        "text": (
+            f"Intent classifier: {intent['intent']} "
+            f"(mode={intent['mode']}, confidence={intent['confidence']:.2f})"
+        ),
+    })
+
+    if intent["mode"] == "deterministic" and intent["intent"] == "next_meeting_lookup":
         next_meeting_response = _format_next_meeting_response(context.get("calendar", []))
         if next_meeting_response:
-            yield _sse({"step": "decision", "text": "Calendar shortcut: answering from meeting context"})
+            yield _sse({"step": "decision", "text": "Hybrid routing: answering directly from calendar context"})
             yield _sse({
                 "step": "result",
-                "thought": "Calendar context already contains the next meeting details, so a direct answer is more useful than another tool call.",
+                "thought": (
+                    "The intent classifier marked this as a high-confidence next-meeting lookup, "
+                    "so the system answered directly from structured calendar context."
+                ),
                 "action": "DRAFT_CONTENT",
                 "payload": next_meeting_response,
             })

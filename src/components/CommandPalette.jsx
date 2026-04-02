@@ -188,6 +188,7 @@ export default function CommandPalette() {
   const [thoughts, setThoughts]           = useState([]);
   const [isProcessing, setIsProcessing]   = useState(false);
   const [displayMode, setDisplayMode]     = useState('user');
+  const [privacyMode, setPrivacyMode]     = useState('safe');
   const [history, setHistory]             = useState([]);
   const [chats, setChats]                 = useState([]);
   const [activeChatId, setActiveChatId]   = useState(null);
@@ -207,9 +208,10 @@ export default function CommandPalette() {
         const { active_window } = await fetch(`${SIDECAR}/get-active-window`).then((r) => r.json());
         if (cancelled || !active_window || active_window === suggestWindow) return;
         setSuggestWindow(active_window);
-        const { suggestions: s } = await fetch(
+        const { suggestions: s, privacy_mode } = await fetch(
           `${SIDECAR}/suggest?window=${encodeURIComponent(active_window)}`
         ).then((r) => r.json());
+        if (!cancelled && privacy_mode) setPrivacyMode(privacy_mode);
         if (!cancelled) setSuggestions(s || []);
       } catch (_) { /* sidecar not ready */ }
     };
@@ -229,6 +231,18 @@ export default function CommandPalette() {
   useEffect(() => {
     refreshChatList();
   }, [refreshChatList]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPrivacyMode = async () => {
+      try {
+        const result = await fetch(`${SIDECAR}/privacy-mode`).then((r) => r.json());
+        if (!cancelled && result?.mode) setPrivacyMode(result.mode);
+      } catch (_) { /* sidecar not ready */ }
+    };
+    loadPrivacyMode();
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Select / load a chat ────────────────────────────────────
   const handleSelectChat = useCallback(async (chatId) => {
@@ -404,6 +418,25 @@ export default function CommandPalette() {
     setQuery(`幫我把 ${file.name} 寄給`);
   }, []);
 
+  const handlePrivacyModeChange = useCallback(async (mode) => {
+    try {
+      const result = await fetch(`${SIDECAR}/privacy-mode`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      }).then((r) => r.json());
+      if (result?.mode) setPrivacyMode(result.mode);
+      addThought({
+        type: 'info',
+        text: result?.mode === 'enhanced'
+          ? 'Enhanced mode enabled: proactive suggestions may use screen-derived context.'
+          : 'Safe mode enabled: proactive suggestions use low-sensitivity context only.',
+      });
+    } catch (e) {
+      addThought({ type: 'error', text: `Could not update privacy mode: ${e.message}` });
+    }
+  }, [addThought]);
+
   return (
     <div className="palette-shell">
       {/* ── Sidebar ── */}
@@ -430,6 +463,18 @@ export default function CommandPalette() {
               className={`mode-toggle-btn${displayMode === 'demo' ? ' mode-toggle-active' : ''}`}
               onClick={() => setDisplayMode('demo')}
             >Demo</button>
+          </div>
+          <div className="mode-toggle" role="group" aria-label="Privacy mode">
+            <button
+              className={`mode-toggle-btn${privacyMode === 'safe' ? ' mode-toggle-active' : ''}`}
+              onClick={() => handlePrivacyModeChange('safe')}
+              title="Safe mode disables screenshot-based proactive suggestions"
+            >Safe</button>
+            <button
+              className={`mode-toggle-btn${privacyMode === 'enhanced' ? ' mode-toggle-active' : ''}`}
+              onClick={() => handlePrivacyModeChange('enhanced')}
+              title="Enhanced mode allows screen-derived context for proactive suggestions"
+            >Enhanced</button>
           </div>
           <button className="close-btn" onClick={() => window.orion?.hideWindow()} aria-label="Close">✕</button>
         </div>
@@ -476,6 +521,19 @@ export default function CommandPalette() {
                 {s}
               </button>
             ))}
+          </div>
+        )}
+
+        {!isProcessing && !query && (
+          <div className="palette-footer" style={{ paddingTop: 0 }}>
+            <span>
+              Privacy: {privacyMode === 'enhanced' ? 'Enhanced' : 'Safe'}
+            </span>
+            <span>
+              {privacyMode === 'enhanced'
+                ? 'Screen context may be used for proactive suggestions'
+                : 'Proactive suggestions use low-sensitivity signals only'}
+            </span>
           </div>
         )}
 

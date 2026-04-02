@@ -266,3 +266,4 @@ Every time the user sends a message, the backend runs the following steps:
 - Metrics: [docs/metrics.md](/Users/kevinhsieh/Documents/New%20project/docs/metrics.md)
 - System Design: [docs/system-design.md](/Users/kevinhsieh/Documents/New%20project/docs/system-design.md)
 - Experiment Plan: [docs/experiment-plan.md](/Users/kevinhsieh/Documents/New%20project/docs/experiment-plan.md)
+- Privacy Design: [docs/privacy-design.md](/Users/kevinhsieh/Documents/New%20project/docs/privacy-design.md)

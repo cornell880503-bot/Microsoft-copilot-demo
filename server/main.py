@@ -28,6 +28,7 @@ import json as _json
 
 from agent import run_agent_stream, generate_chat_title, generate_suggestions
 from memory_store import MemoryStore
+from privacy_mode import load_privacy_mode, save_privacy_mode, VALID_MODES
 from email_sender import send_email
 from window_context import get_active_window_title
 from rag.indexer import index_local_data
@@ -130,8 +131,25 @@ async def get_active_window():
 async def suggest(window: str = ""):
     """Return 3 proactive action suggestions based on the active window."""
     active = window or get_active_window_title() or ""
-    result = await generate_suggestions(active)
-    return {"window": active, "suggestions": result}
+    privacy = load_privacy_mode()
+    result = await generate_suggestions(active, privacy_mode=privacy["mode"])
+    return {"window": active, "privacy_mode": privacy["mode"], "suggestions": result}
+
+
+class PrivacyModeRequest(BaseModel):
+    mode: str = Field(..., min_length=1)
+
+
+@app.get("/privacy-mode")
+async def get_privacy_mode():
+    return load_privacy_mode()
+
+
+@app.put("/privacy-mode")
+async def update_privacy_mode(body: PrivacyModeRequest):
+    if body.mode.strip().lower() not in VALID_MODES:
+        raise HTTPException(status_code=400, detail=f"Invalid privacy mode: {body.mode}")
+    return save_privacy_mode(body.mode)
 
 
 @app.get("/memory")
