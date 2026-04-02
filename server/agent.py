@@ -507,6 +507,20 @@ def _screen_calendar_result_is_credible(result: dict) -> bool:
     return len(evidence) >= 1
 
 
+def _public_thought_for_action(action: str) -> str:
+    mapping = {
+        "DRAFT_CONTENT": "Generated a response based on the available context.",
+        "GENERATE_IMAGE": "Generated an image based on the current request and app context.",
+        "SEND_EMAIL": "Prepared an email draft for confirmation.",
+        "SAVE_FILE": "Prepared file content for saving.",
+        "SCHEDULE_MEETING": "Prepared a meeting draft for confirmation.",
+        "OPEN_APP": "Prepared an app action based on the current request.",
+        "EXECUTE_PYTHON": "Analyzed the active document with Python.",
+        "SEARCH_LOCAL_DOCS": "Ranked the most relevant local files for the current request.",
+    }
+    return mapping.get(action, "Processed the request using the current context.")
+
+
 def _ocr_text_has_google_calendar_signal(ocr_text: str) -> bool:
     text = normalize_query(ocr_text)
     signals = (
@@ -1237,6 +1251,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 raise ValueError(f"Missing key '{key}' in Gemini response")
 
         action = result["action"]
+        result["thought"] = _public_thought_for_action(action)
         if screen_calendar_fallback and action == "DRAFT_CONTENT":
             result["payload"] = _format_inferred_calendar_payload(str(result.get("payload", "")))
         yield _sse({"step": "think", "text": f"Decision: {action}"})
