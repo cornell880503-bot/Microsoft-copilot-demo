@@ -1,81 +1,162 @@
-# Project Copilot — Microsoft Copilot Demo
+# Project Copilot: Reimagined for Product Strategy and Demo Execution
 
-An AI-powered desktop assistant built with Electron + React + Python, styled after Microsoft Copilot. Demonstrates a full agentic workflow: real-time document reading, RAG over local files, image generation, email sending, calendar scheduling, and multi-turn conversation — all streamed in real time.
+An AI-powered desktop assistant built with Electron + React + Python, styled after Microsoft Copilot. This repository now combines two layers:
 
----
+- a working prototype that demonstrates agentic desktop assistance
+- a PM-ready product strategy narrative for how Copilot evolves from reactive chat into a proactive AI system
+
+## Product Framing
+
+This project explores the next evolution of AI assistants beyond chat-based interaction, inspired by the vision of Microsoft Copilot.
+
+Instead of a reactive chatbot, this demo proposes a proactive, context-aware Copilot that:
+
+- understands user workflows across applications
+- anticipates user needs
+- executes multi-step tasks autonomously
+
+### Product Vision
+
+Copilot should evolve from a tool you ask into a system that works alongside you.
+
+We believe the next generation of AI assistants will:
+
+- reduce context switching across apps
+- persist memory across sessions
+- act, not just respond
+
+### Target Users
+
+Primary segment:
+
+Knowledge workers using Windows and web tools daily.
+
+Key pain points:
+
+- constant context switching across browser, docs, and chat
+- repetitive workflows
+- lack of persistent AI memory
+
+### Product Thesis
+
+We propose that:
+
+- proactive beats reactive
+- context is the moat
+- memory drives stickiness
+
+Copilot should surface suggestions without prompting, use OS-level and app-level context to unlock a better user experience, and build long-term personalization that improves retention.
+
+### Success Metrics
+
+North Star Metric:
+
+Tasks successfully completed per user per day.
+
+Supporting Metrics:
+
+- time saved per task
+- D7 and D30 retention
+- task success rate
+- tool invocation accuracy
+
+### Experimentation Approach
+
+We would validate this product direction through:
+
+- A/B testing proactive suggestions versus reactive UX
+- measuring engagement uplift from memory features
+- evaluating task completion versus baseline Copilot
+
+### Why Microsoft Wins
+
+This approach uniquely benefits from Microsoft's ecosystem:
+
+- Windows as a distribution layer
+- Office and Graph data for deep context
+- enterprise trust and compliance advantages
+
+## Demo Capabilities
+
+The prototype demonstrates:
+
+- multi-step task execution
+- tool usage through external actions and APIs
+- context-aware responses
+- early exploration of memory integration
+- real-time document reading from the active desktop workflow
+- local RAG over files
+- image generation, email sending, and scheduling actions
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
-| **Document-Aware Context** | Extracts actual text from the open document (PDF, Excel, CSV, Word) and passes it to the model — no screenshot guessing |
-| **Proactive Suggestions** | Background monitor tracks the active app; surfaces 3 context-aware action chips within seconds of opening Copilot |
-| **Local RAG** | Indexes your PDF / TXT files into a vector store and retrieves relevant content via semantic search |
-| **Semantic File Search** | Search files by natural language; AI ranks top 3–5 candidates with open (📂) and email (📧) buttons per result |
-| **Image Generation** | Calls Gemini Image Model with an auto-enhanced prompt and displays the result inline |
-| **Email Sending** | Drafts a complete email, auto-attaches your CV or last generated image, and sends it via SMTP |
-| **Schedule Meeting** | Creates a `.ics` calendar event and opens it in the system Calendar app |
-| **Open App** | Launches any macOS application by name; browser actions open a Bing search URL directly |
-| **Multi-turn Memory** | Maintains conversation context across messages and persists chats to disk (`~/.copilot/chats/`) |
-| **Conversation Sidebar** | Create, switch, rename, and delete conversations; AI auto-generates a title from the first message |
-| **Dual UI Mode** | User Mode (clean Copilot-style chat bubbles) / Demo Mode (full agent pipeline log with HEAL steps) |
-| **Self-healing Errors** | RAG failures and Gemini format errors trigger automatic fallback and retry, shown as amber HEAL steps |
+| **Document-Aware Context** | Extracts actual text from the open document (PDF, Excel, CSV, Word) and passes it to the model, without relying on screenshot guessing |
+| **Proactive Suggestions** | Background monitor tracks the active app and surfaces context-aware action chips shortly after opening Copilot |
+| **Local RAG** | Indexes PDF and TXT files into a vector store and retrieves relevant content via semantic search |
+| **Semantic File Search** | Searches files by natural language and ranks top candidates with open and email actions |
+| **Image Generation** | Calls the Gemini image model with an enhanced prompt and displays the result inline |
+| **Email Sending** | Drafts a complete email, auto-attaches a CV or the last generated image, and sends it via SMTP |
+| **Schedule Meeting** | Creates a `.ics` calendar event and opens it in the system calendar app |
+| **Open App** | Launches a macOS application by name, or opens browser actions through Bing search |
+| **Multi-turn Memory** | Maintains conversation context across messages and persists chats to disk |
+| **Conversation Sidebar** | Creates, switches, renames, and deletes conversations, with auto-generated titles |
+| **Dual UI Mode** | Supports both User Mode and Demo Mode with visible agent pipeline logs |
+| **Self-healing Errors** | Retries on RAG and Gemini formatting failures with visible fallback behavior |
 
----
+## Why Microsoft Copilot
 
-## Why Microsoft Copilot — Product Differentiation
-
-This prototype demonstrates the *concept* behind Microsoft Copilot. The real competitive moat sits in four layers that no third-party AI tool can replicate:
+This prototype demonstrates the product concept behind Microsoft Copilot. The real moat sits in four layers that are difficult for third-party AI tools to replicate:
 
 ### 1. OS-Level Native Integration
-Claude Code is an app. Copilot is part of Windows itself. Through Recall and native OS APIs, Copilot can observe everything happening on the device — not as a screenshot hack, but as a first-party privileged process. This enables ambient intelligence that operates across all apps without any user setup.
 
-### 2. Microsoft Graph — Real Personal Context
-Copilot has read access to your entire Microsoft 365 identity:
-- **Outlook** — who you email, what topics, ongoing threads
-- **Teams** — meeting history, decisions made, people you work with
-- **Calendar** — your schedule, recurring events, time zone
-- **SharePoint / OneDrive** — your org's full knowledge base
+Copilot can become part of the operating system itself. With first-party OS APIs and privileged context, it can observe workflows across applications without requiring user setup or hacky workarounds.
 
-This is not a RAG hack over PDFs — it is a live, permissioned, org-aware knowledge graph. No external AI product has access to this.
+### 2. Microsoft Graph as Personal Context
+
+Copilot can use the Microsoft 365 graph as a live, permissioned knowledge graph across:
+
+- Outlook
+- Teams
+- Calendar
+- SharePoint and OneDrive
+
+This goes beyond file-based RAG into identity-aware, org-aware assistance.
 
 ### 3. Enterprise Trust at Scale
-- Data stays within the customer's Microsoft 365 tenant — nothing leaves the enterprise boundary
-- Microsoft manages GDPR, HIPAA, SOC 2, and ISO 27001 compliance on behalf of customers
-- IT admins control exactly what Copilot can access and do — data policy, DLP, audit logs
-- This is the reason Fortune 500 companies pay for M365 Copilot rather than building their own
 
-### 4. 1.4 Billion Device Distribution
-Claude Code requires installation. Copilot ships on every Windows 11 PC by default. No AI company can buy this distribution. Every new capability MAI ships reaches over a billion potential users on day one — without an app store, without onboarding friction.
+- data stays within the Microsoft 365 tenant boundary
+- Microsoft provides enterprise compliance and governance controls
+- admins can manage access, auditability, and policy enforcement
 
-> **The hard problem is not the AI model. Anyone can call an API. The hard problem is trust, context, and distribution at enterprise scale — and Microsoft already solved all three.**
+### 4. Massive Distribution
 
----
+Copilot ships through Windows and Microsoft 365 surfaces. That distribution advantage makes new capabilities immediately reachable without separate onboarding.
 
 ## Tech Stack
 
 **Frontend**
-- Electron + React + Vite
-- Custom CSS (Microsoft Fluent Design inspired)
+
+- Electron
+- React
+- Vite
 
 **Backend**
-- FastAPI (Python 3.12) — SSE streaming responses
-- Gemini 2.5 Flash — decision-making + multimodal
-- Gemini Image Model — image generation
-- ChromaDB + `sentence-transformers/all-MiniLM-L6-v2` — local vector search
-- LangChain — PDF / TXT parsing and chunking
-- `pypdf`, `openpyxl`, `python-docx` — document text extraction
 
----
+- FastAPI on Python 3.12
+- Gemini 2.5 Flash for reasoning and multimodal tasks
+- Gemini image model for image generation
+- ChromaDB with `sentence-transformers/all-MiniLM-L6-v2` for local vector search
+- LangChain for parsing and chunking
+- `pypdf`, `openpyxl`, and `python-docx` for document extraction
 
 ## Prerequisites
 
 - Node.js 18+
-- Python 3.10–3.12 (3.13 not yet supported by ChromaDB)
-- Gemini API Key — [Google AI Studio](https://aistudio.google.com/)
-- macOS: grant **Screen Recording** permission to Terminal (System Settings → Privacy & Security → Screen Recording)
-
----
+- Python 3.10 to 3.12
+- Gemini API key from [Google AI Studio](https://aistudio.google.com/)
+- macOS screen recording permission for Terminal
 
 ## Setup
 
@@ -95,7 +176,7 @@ cd server
 
 Create a `.env` file:
 
-```
+```env
 GEMINI_API_KEY=your_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
 ```
@@ -104,103 +185,84 @@ GEMINI_MODEL=gemini-2.5-flash
 
 Drop any PDF or TXT files into `server/local_data/`. They will be indexed automatically on startup.
 
----
-
 ## Running
 
-Open two terminals:
+Open two terminals.
 
-**Terminal 1 — Python Sidecar**
+**Terminal 1: Python sidecar**
+
 ```bash
 cd server
 bash start.sh
 ```
 
-**Terminal 2 — Electron App**
+**Terminal 2: Electron app**
+
 ```bash
 npm run dev
 ```
 
----
-
 ## Project Structure
 
-```
+```text
 Microsoft-copilot-demo/
-├── electron/                   # Electron main process
-├── src/
-│   ├── components/
-│   │   ├── CommandPalette.jsx  # Main component: sidebar + conversation management
-│   │   ├── AgentThoughts.jsx   # Message rendering (User / Demo dual mode)
-│   │   ├── ActionCard.jsx      # Email / save / schedule / open-app confirmation cards
-│   │   └── SearchInput.jsx     # Input bar
-│   └── styles/
-│       └── index.css
-└── server/
-    ├── main.py                 # FastAPI routes
-    ├── agent.py                # Gemini agent pipeline (SSE streaming)
-    ├── chats.py                # Chat persistence (~/.copilot/chats/)
-    ├── window_context.py       # Active app tracking + document text extraction
-    ├── email_sender.py         # SMTP email sending with retry
-    ├── rag/
-    │   ├── indexer.py          # Document vectorization
-    │   └── searcher.py         # Semantic search
-    └── local_data/             # Place your PDF / TXT files here
+├── demo/                      # Placeholder for standalone demo assets if needed
+├── docs/                      # PM-facing strategy and experiment documents
+├── electron/                  # Electron main process
+├── server/                    # FastAPI backend and agent pipeline
+├── src/                       # React frontend
+└── README.md
 ```
-
----
 
 ## Agent Pipeline
 
 Every time the user sends a message, the backend runs the following steps:
 
-```
-1. Detect the previously active app (background monitor — not Electron)
-2. Extract text from the open document (PDF / Excel / CSV / Word / Pages)
-   └─ Fallback: capture desktop screenshot if no document detected
-3. Run semantic search over local documents (RAG)
-4. Call Gemini with text + document content + conversation history
-5. Execute the chosen action:
-   DRAFT_CONTENT / GENERATE_IMAGE / SEND_EMAIL / SAVE_FILE /
-   SCHEDULE_MEETING / OPEN_APP / SEARCH_LOCAL_DOCS
+```text
+1. Detect the previously active app
+2. Extract text from the open document
+3. Run semantic search over local documents
+4. Call Gemini with text, document content, and conversation history
+5. Execute the chosen action
 6. Stream results back to the frontend via SSE
-7. Persist conversation to disk; auto-generate title on first message
+7. Persist conversation to disk and generate a title
 ```
-
----
 
 ## Actions
 
 | Action | Trigger | Behaviour |
 |--------|---------|-----------|
 | `DRAFT_CONTENT` | Write, summarize, explain, translate | Returns formatted text response |
-| `GENERATE_IMAGE` | Create / visualize an image | Calls Gemini Image Model; result saved to disk for email attachment |
-| `SEND_EMAIL` | Send an email | Action card with editable fields; auto-attaches CV or last image |
-| `SAVE_FILE` | Save content to disk | Writes to `~/Downloads/` |
-| `SCHEDULE_MEETING` | Schedule a meeting | Generates `.ics` and opens system Calendar |
-| `OPEN_APP` | Open an application | `open -a <app>`; browser + query opens Bing search |
-| `SEARCH_LOCAL_DOCS` | Find a file | Scans Downloads / Documents / Desktop; AI ranks top 5 results |
-
----
+| `GENERATE_IMAGE` | Create or visualize an image | Calls Gemini image model and saves the result for downstream use |
+| `SEND_EMAIL` | Send an email | Opens an action card with editable fields and optional attachments |
+| `SAVE_FILE` | Save content to disk | Writes output to `~/Downloads/` |
+| `SCHEDULE_MEETING` | Schedule a meeting | Generates an `.ics` file and opens the system calendar |
+| `OPEN_APP` | Open an application | Launches an app or browser search |
+| `SEARCH_LOCAL_DOCS` | Find a file | Scans local directories and ranks relevant files |
 
 ## Privacy
 
-- **Document text** is extracted locally and sent only to the Gemini API — never stored on any server
-- **Screenshots** (fallback only) are taken in memory and discarded immediately after the API call
-- **Conversations** are stored locally at `~/.copilot/chats/` — never uploaded
-- **CV / file paths** are resolved locally; only the email body is sent via SMTP
-
----
+- document text is extracted locally and sent only to the Gemini API
+- screenshots are used only as a fallback and discarded after the API call
+- conversations are stored locally in `~/.copilot/chats/`
+- file paths and attachments are resolved locally
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GEMINI_API_KEY` | — | Required. Your Google Gemini API key |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model for decision-making |
-| `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image-preview` | Gemini model for image generation |
-| `SMTP_HOST` | — | SMTP server for email sending |
+| `GEMINI_API_KEY` | none | Required. Gemini API key |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Model for reasoning |
+| `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image-preview` | Model for image generation |
+| `SMTP_HOST` | none | SMTP server |
 | `SMTP_PORT` | `587` | SMTP port |
-| `SMTP_USER` | — | SMTP username / email address |
-| `SMTP_PASS` | — | SMTP password or app password |
-| `EXTRA_DATA_DIRS` | — | Colon-separated extra directories to scan for files |
+| `SMTP_USER` | none | SMTP username or email |
+| `SMTP_PASS` | none | SMTP password or app password |
+| `EXTRA_DATA_DIRS` | none | Extra directories to scan |
+
+## Additional Docs
+
+- Product Strategy: [docs/product-strategy.md](/Users/kevinhsieh/Documents/New%20project/docs/product-strategy.md)
+- Metrics: [docs/metrics.md](/Users/kevinhsieh/Documents/New%20project/docs/metrics.md)
+- System Design: [docs/system-design.md](/Users/kevinhsieh/Documents/New%20project/docs/system-design.md)
+- Experiment Plan: [docs/experiment-plan.md](/Users/kevinhsieh/Documents/New%20project/docs/experiment-plan.md)
