@@ -90,7 +90,9 @@ class ContextProvider:
     def fetch_recent_emails(self, user_input: str, active_window: str) -> list[ContextItem]:
         lower_window = (active_window or "").lower()
         lower_query = user_input.lower()
-        if not any(token in lower_window or token in lower_query for token in ("email", "mail", "outlook", "reply", "client")):
+        email_app_hints = ("outlook", "mail", "gmail", "lark", "teams")
+        email_query_hints = ("email", "mail", "reply", "client")
+        if not any(token in lower_window for token in email_app_hints) and not any(token in lower_query for token in email_query_hints):
             return []
 
         return [
@@ -106,7 +108,9 @@ class ContextProvider:
     def fetch_upcoming_events(self, user_input: str, active_window: str) -> list[ContextItem]:
         lower_window = (active_window or "").lower()
         lower_query = user_input.lower()
-        if not any(token in lower_window or token in lower_query for token in ("meeting", "calendar", "prep", "sync")):
+        calendar_app_hints = ("calendar", "lark", "outlook", "teams", "google calendar")
+        calendar_query_hints = ("meeting", "calendar", "prep", "sync", "agenda")
+        if not any(token in lower_window for token in calendar_app_hints) and not any(token in lower_query for token in calendar_query_hints):
             return []
 
         starts_at = datetime.now() + timedelta(minutes=10)
@@ -119,4 +123,3 @@ class ContextProvider:
                 metadata={"starts_in_minutes": 10, "attendees": ["PM", "Eng", "Design"]},
             )
         ]
-

@@ -206,8 +206,8 @@ export default function CommandPalette() {
     const poll = async () => {
       try {
         const { active_window } = await fetch(`${SIDECAR}/get-active-window`).then((r) => r.json());
-        if (cancelled || !active_window || active_window === suggestWindow) return;
-        setSuggestWindow(active_window);
+        if (cancelled || !active_window) return;
+        if (active_window !== suggestWindow) setSuggestWindow(active_window);
         const { suggestions: s, privacy_mode } = await fetch(
           `${SIDECAR}/suggest?window=${encodeURIComponent(active_window)}`
         ).then((r) => r.json());

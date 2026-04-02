@@ -40,6 +40,8 @@ class SuggestionEngine:
             triggers.append("pre_meeting")
         if emails and (not query or any(token in query for token in ("email", "reply", "follow up", "client"))):
             triggers.append("email_followup")
+        elif emails:
+            triggers.append("inbox_context")
         if len(documents) >= 2:
             triggers.append("document_focus")
 
@@ -66,6 +68,16 @@ class SuggestionEngine:
                     action="draft_client_reply",
                     relevance_score=0.86,
                     reason="Recent email context suggests a follow-up task.",
+                )
+            )
+        if "inbox_context" in triggers:
+            suggestions.append(
+                Suggestion(
+                    type="email_summary",
+                    text="Summarize your latest messages",
+                    action="summarize_recent_messages",
+                    relevance_score=0.72,
+                    reason="Mail or collaboration context is active.",
                 )
             )
         if "document_focus" in triggers:

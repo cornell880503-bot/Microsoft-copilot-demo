@@ -37,6 +37,21 @@ fi
 PY_VERSION=$("$PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 echo "Using Python $PY_VERSION ($PYTHON)"
 
+# ── Reclaim the sidecar port if a previous instance is still running ─────────
+PORT="${SIDECAR_PORT:-8765}"
+EXISTING_PIDS="$(lsof -tiTCP:${PORT} -sTCP:LISTEN 2>/dev/null | tr '\n' ' ')"
+if [ -n "$EXISTING_PIDS" ]; then
+  echo "Port $PORT is already in use. Stopping previous sidecar process(es): $EXISTING_PIDS"
+  kill $EXISTING_PIDS 2>/dev/null || true
+  sleep 1
+  STILL_RUNNING="$(lsof -tiTCP:${PORT} -sTCP:LISTEN 2>/dev/null | tr '\n' ' ')"
+  if [ -n "$STILL_RUNNING" ]; then
+    echo "Port $PORT is still busy. Force stopping: $STILL_RUNNING"
+    kill -9 $STILL_RUNNING 2>/dev/null || true
+    sleep 1
+  fi
+fi
+
 # ── Create virtualenv ─────────────────────────────────────────────────────────
 if [ ! -d ".venv" ]; then
   echo "Creating virtual environment..."
@@ -58,5 +73,5 @@ echo "Installing dependencies (first run downloads ~300MB of ML models)..."
 pip install -q -r requirements.txt
 
 echo ""
-echo "Starting Copilot sidecar on http://127.0.0.1:8765 ..."
-uvicorn main:app --host 127.0.0.1 --port 8765 --reload
+echo "Starting Copilot sidecar on http://127.0.0.1:${PORT} ..."
+uvicorn main:app --host 127.0.0.1 --port "$PORT" --reload
