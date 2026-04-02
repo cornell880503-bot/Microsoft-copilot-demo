@@ -308,21 +308,37 @@ async def generate_suggestions(active_window: str, privacy_mode: str = "safe") -
 
     provider = ContextProvider()
     engine = SuggestionEngine()
-    screen_signal = None
-    if privacy_mode == ENHANCED_MODE:
-        screen_signal = capture_screen_base64()
-    synthetic_query = ""
-    if privacy_mode == ENHANCED_MODE and screen_signal:
-        lower_window = active_window.lower()
-        if "lark" in lower_window:
-            synthetic_query = "meeting calendar agenda"
-        elif "outlook" in lower_window:
-            synthetic_query = "email calendar follow up"
-        elif "calendar" in lower_window:
-            synthetic_query = "meeting calendar"
-    context = provider.get_context(synthetic_query, active_window, None, None, [])
+    context = provider.get_context("", active_window, None, None, [])
     triggers = engine.detect_triggers("", context)
     suggestions = engine.generate_suggestions(triggers, context)
+
+    # Enhanced mode: if real/local context did not produce suggestions,
+    # fall back to screen-derived inference.
+    if not suggestions and privacy_mode == ENHANCED_MODE:
+        screen_signal = capture_screen_base64()
+        synthetic_query = ""
+        if screen_signal:
+            lower_window = active_window.lower()
+            if "lark" in lower_window:
+                synthetic_query = "meeting calendar agenda"
+            elif "outlook" in lower_window:
+                synthetic_query = "email calendar follow up"
+            elif "calendar" in lower_window:
+                synthetic_query = "meeting calendar"
+            elif "mail" in lower_window:
+                synthetic_query = "email inbox follow up"
+
+        if synthetic_query:
+            context = provider.get_context(synthetic_query, active_window, None, None, [])
+            triggers = engine.detect_triggers(synthetic_query, context)
+            suggestions = engine.generate_suggestions(triggers, context)
+            if suggestions:
+                logger.info(
+                    "Suggestions for '%s' [%s]: using screen-derived fallback",
+                    active_window,
+                    privacy_mode,
+                )
+
     result = [item.text for item in suggestions]
     logger.info("Suggestions for '%s' [%s]: %s", active_window, privacy_mode, result)
     return result

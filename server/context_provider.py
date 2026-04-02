@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from local_calendar import fetch_upcoming_events as fetch_local_calendar_events
+
 
 def _truncate(text: str, limit: int = 800) -> str:
     text = (text or "").strip()
@@ -113,13 +115,21 @@ class ContextProvider:
         if not any(token in lower_window for token in calendar_app_hints) and not any(token in lower_query for token in calendar_query_hints):
             return []
 
-        starts_at = datetime.now() + timedelta(minutes=10)
-        return [
-            ContextItem(
-                title="Product sync with stakeholders",
-                summary="Mock calendar context: discuss launch blockers, metrics, and open risks.",
-                source="mock_calendar",
-                timestamp=starts_at.isoformat(timespec="minutes"),
-                metadata={"starts_in_minutes": 10, "attendees": ["PM", "Eng", "Design"]},
-            )
-        ]
+        real_events = fetch_local_calendar_events(limit=3, lookahead_hours=24)
+        if real_events:
+            return [
+                ContextItem(
+                    title=event.title,
+                    summary=f"Upcoming event from {event.calendar_name}" + (f" at {event.location}" if event.location else ""),
+                    source="local_calendar",
+                    timestamp=event.start_text,
+                    metadata={
+                        "calendar_name": event.calendar_name,
+                        "location": event.location,
+                        "starts_in_minutes": event.starts_in_minutes,
+                    },
+                )
+                for event in real_events
+            ]
+
+        return []
