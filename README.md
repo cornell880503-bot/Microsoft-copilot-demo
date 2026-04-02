@@ -92,9 +92,11 @@ The prototype demonstrates:
 
 | Feature | Description |
 |---------|-------------|
-| **Document-Aware Context** | Extracts actual text from the open document (PDF, Excel, CSV, Word) and passes it to the model, without relying on screenshot guessing |
+| **Screenshot-First Context** | Captures the current app window on every request so the model always has visual grounding from the user's live workspace |
+| **Document-Aware Context** | Extracts actual text from the open document (PDF, Excel, CSV, Word) and combines it with screenshot context for better reasoning |
 | **Proactive Suggestions** | Background monitor tracks the active app and surfaces context-aware action chips shortly after opening Copilot |
 | **Local RAG** | Indexes PDF and TXT files into a vector store and retrieves relevant content via semantic search |
+| **Calendar Screen Reading** | Uses screenshot understanding and OCR-style extraction to answer calendar questions when structured connectors are missing |
 | **Semantic File Search** | Searches files by natural language and ranks top candidates with open and email actions |
 | **Image Generation** | Calls the Gemini image model with an enhanced prompt and displays the result inline |
 | **Email Sending** | Drafts a complete email, auto-attaches a CV or the last generated image, and sends it via SMTP |
@@ -220,12 +222,13 @@ Every time the user sends a message, the backend runs the following steps:
 
 ```text
 1. Detect the previously active app
-2. Extract text from the open document
-3. Run semantic search over local documents
-4. Call Gemini with text, document content, and conversation history
-5. Execute the chosen action
-6. Stream results back to the frontend via SSE
-7. Persist conversation to disk and generate a title
+2. Extract text from the open document when supported
+3. Capture the current app window for visual grounding
+4. Run semantic search over local documents
+5. Call Gemini with screenshot, document content, memory, and conversation history
+6. Execute the chosen action
+7. Stream results back to the frontend via SSE
+8. Persist conversation to disk and generate a title
 ```
 
 ## Actions
@@ -243,9 +246,18 @@ Every time the user sends a message, the backend runs the following steps:
 ## Privacy
 
 - document text is extracted locally and sent only to the Gemini API
-- screenshots are used only as a fallback and discarded after the API call
+- screenshots are captured for every main query and discarded after OCR / API processing
+- temporary screenshot files are deleted immediately after capture
 - conversations are stored locally in `~/.copilot/chats/`
 - file paths and attachments are resolved locally
+
+## Current Behavior Notes
+
+- the main query path is now screenshot-first: every request includes the current app window as visual context
+- when a supported document is open, the system sends both structured document text and the screenshot
+- structured calendar data primarily comes from macOS Calendar
+- browser-based calendars such as Google Calendar and app-based calendars such as Lark currently rely on screenshot understanding rather than first-party connectors
+- demo mode shows pipeline steps, but result cards no longer expose raw model reasoning text
 
 ## Environment Variables
 
@@ -262,8 +274,8 @@ Every time the user sends a message, the backend runs the following steps:
 
 ## Additional Docs
 
-- Product Strategy: [docs/product-strategy.md](/Users/kevinhsieh/Documents/New%20project/docs/product-strategy.md)
-- Metrics: [docs/metrics.md](/Users/kevinhsieh/Documents/New%20project/docs/metrics.md)
-- System Design: [docs/system-design.md](/Users/kevinhsieh/Documents/New%20project/docs/system-design.md)
-- Experiment Plan: [docs/experiment-plan.md](/Users/kevinhsieh/Documents/New%20project/docs/experiment-plan.md)
-- Privacy Design: [docs/privacy-design.md](/Users/kevinhsieh/Documents/New%20project/docs/privacy-design.md)
+- Product Strategy: [docs/product-strategy.md](docs/product-strategy.md)
+- Metrics: [docs/metrics.md](docs/metrics.md)
+- System Design: [docs/system-design.md](docs/system-design.md)
+- Experiment Plan: [docs/experiment-plan.md](docs/experiment-plan.md)
+- Privacy Design: [docs/privacy-design.md](docs/privacy-design.md)
