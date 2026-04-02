@@ -344,6 +344,13 @@ export default function CommandPalette() {
             assistantSummary = `[Proposed ${action}: ${summary}]`;
           } else if (step === 'file_results') {
             addThought({ type: 'file_results', thought: event.thought, results: event.results });
+          } else if (step === 'suggestions') {
+            const summary = (event.suggestions || [])
+              .map((item) => `• ${item.text}`)
+              .join('\n');
+            addThought({ type: 'suggestions', text: `Proactive suggestions\n${summary}` });
+          } else if (step === 'memory' || step === 'decision') {
+            addThought({ type: step, text });
           } else if (step === 'error') {
             addThought({ type: 'error', text });
           } else {

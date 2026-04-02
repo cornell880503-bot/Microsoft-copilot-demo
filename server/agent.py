@@ -23,7 +23,11 @@ from typing import AsyncGenerator
 from google import genai
 from google.genai import types
 
+from context_provider import ContextProvider
+from memory_store import MemoryStore
+from prompt_builder import PromptBuilder
 from rag.searcher import search_docs
+from suggestion_engine import SuggestionEngine
 from window_context import get_active_window_title, capture_screen_base64, get_active_document_content
 
 logger = logging.getLogger(__name__)
@@ -176,31 +180,21 @@ def _clean_json(raw: str) -> str:
 
 
 async def generate_suggestions(active_window: str) -> list[str]:
-    """Generate 2-3 proactive action suggestions based on the active window."""
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key or not active_window or active_window in ("Unknown", ""):
+    """
+    Keep the frontend contract as a string array while the backend internally
+    uses structured suggestions and decision logic.
+    """
+    if not active_window or active_window in ("Unknown", ""):
         return []
-    try:
-        client = genai.Client(api_key=api_key)
-        resp = client.models.generate_content(
-            model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL),
-            contents=(
-                f"The user is currently working in: {active_window}\n\n"
-                "Generate exactly 3 short, specific action suggestions for a Copilot AI assistant "
-                "based on what the user is likely doing in this app. "
-                "Each suggestion must be 4-8 words, start with a verb, and be directly useful. "
-                "Reply with ONLY a valid JSON array of 3 strings, no explanation:\n"
-                '["suggestion 1", "suggestion 2", "suggestion 3"]'
-            ),
-        )
-        raw = re.sub(r"^```(?:json)?\s*", "", resp.text.strip())
-        raw = re.sub(r"\s*```$", "", raw).strip()
-        result = json.loads(raw)[:3]
-        logger.info("Suggestions for '%s': %s", active_window, result)
-        return result
-    except Exception as e:
-        logger.warning("generate_suggestions failed for '%s': %s", active_window, e)
-        return []
+
+    provider = ContextProvider()
+    engine = SuggestionEngine()
+    context = provider.get_context("", active_window, None, None, [])
+    triggers = engine.detect_triggers("", context)
+    suggestions = engine.generate_suggestions(triggers, context)
+    result = [item.text for item in suggestions]
+    logger.info("Suggestions for '%s': %s", active_window, result)
+    return result
 
 
 async def generate_chat_title(user_query: str) -> str:
@@ -221,44 +215,6 @@ async def generate_chat_title(user_query: str) -> str:
         return resp.text.strip()[:60] or user_query[:48]
     except Exception:
         return user_query[:48]
-
-
-def _build_user_turn(user_input: str, active_window: str, rag_results: list[dict],
-                     doc_text: str | None = None, doc_path: str | None = None) -> str:
-    """Build the current user turn text (system prompt goes in system_instruction)."""
-    rag_section = ""
-    if rag_results:
-        excerpts = "\n---\n".join(
-            f"[source: {r['source']}, score: {r['score']:.3f}]\n{r['content']}"
-            for r in rag_results
-        )
-        rag_section = f"\n\nLocal Knowledge Base Results:\n{excerpts}"
-    doc_section = ""
-    if doc_path:
-        fname = Path(doc_path).name if doc_path else "document"
-        ext = Path(doc_path).suffix.lower() if doc_path else ""
-        if doc_text and ext not in (".csv", ".xlsx", ".xls"):
-            # For non-data files (PDF, Word, etc.) embed full text for reading/summarizing
-            doc_section = f"\n\nActive Document — {fname} (path: {doc_path}):\n{doc_text}"
-        elif doc_text:
-            # For data files: provide only the first few rows so AI knows the schema,
-            # but MUST use DOC_PATH env var to read the full file in code
-            preview = "\n".join(doc_text.splitlines()[:8])
-            doc_section = (
-                f"\n\nActive Document — {fname}\n"
-                f"Full file path (use this in code): {doc_path}\n"
-                f"File preview (first 8 rows):\n{preview}\n"
-                f"NOTE: Do NOT hardcode data. Always read the file using: "
-                f"pd.read_csv(os.environ['DOC_PATH']) or equivalent."
-            )
-        else:
-            doc_section = f"\n\nActive Document path: {doc_path}"
-    return (
-        f"Active Application: {active_window or 'Unknown'}\n"
-        f"User Query: {user_input}"
-        f"{doc_section}"
-        f"{rag_section}"
-    )
 
 
 async def _generate_image(
@@ -326,6 +282,11 @@ async def _generate_image(
 
 
 async def run_agent_stream(user_input: str, history: list[dict] | None = None) -> AsyncGenerator[str, None]:
+    context_provider = ContextProvider()
+    memory_store = MemoryStore()
+    prompt_builder = PromptBuilder()
+    suggestion_engine = SuggestionEngine()
+
     # ── Step 1: Window Context ─────────────────────────────────────────────
     yield _sse({"step": "context", "text": "Reading your active application..."})
     active_window = get_active_window_title() or "Unknown"
@@ -360,6 +321,31 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         rag_results = []
         yield _sse({"step": "heal", "text": "Local knowledge base unavailable — AI is falling back to general reasoning..."})
 
+    # ── Step 2.5: Context + Memory + Decision ─────────────────────────────
+    context = context_provider.get_context(user_input, active_window, doc_text, doc_path, rag_results)
+    context_counts = {key: len(value) for key, value in context.items()}
+    yield _sse({"step": "context", "text": f"Context loaded: docs={context_counts['documents']}, emails={context_counts['emails']}, calendar={context_counts['calendar']}"})
+
+    memory_updates = memory_store.maybe_update_from_user_input(user_input)
+    memory = memory_store.get_preferences()
+    if memory_updates:
+        updates = ", ".join(f"{key}={value}" for key, value in memory_updates.items())
+        yield _sse({"step": "memory", "text": f"Updated explicit memory: {updates}"})
+    elif memory:
+        memory_summary = ", ".join(f"{key}={value}" for key, value in memory.items())
+        yield _sse({"step": "memory", "text": f"Loaded memory: {memory_summary}"})
+
+    triggers = suggestion_engine.detect_triggers(user_input, context)
+    structured_suggestions = suggestion_engine.generate_suggestions(triggers, context)
+    decision_mode = suggestion_engine.decide_mode(structured_suggestions)
+    yield _sse({"step": "decision", "text": f"Decision layer: {decision_mode} mode"})
+    if structured_suggestions:
+        yield _sse({
+            "step": "suggestions",
+            "mode": decision_mode,
+            "suggestions": [item.to_dict() for item in structured_suggestions],
+        })
+
     # ── Step 3: Gemini Decision ────────────────────────────────────────────
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
@@ -379,7 +365,20 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             contents.append({"role": role, "parts": [{"text": msg["content"]}]})
 
         # Current turn: include screenshot if available
-        user_text = _build_user_turn(user_input, active_window, rag_results, doc_text, doc_path)
+        prompt_bundle = prompt_builder.build_augmented_prompt(
+            user_input=user_input,
+            active_window=active_window,
+            context=context,
+            memory=memory,
+            rag_results=rag_results,
+            doc_text=doc_text,
+            doc_path=doc_path,
+        )
+        if prompt_bundle["context_used"]:
+            yield _sse({"step": "context", "text": f"Prompt augmented with: {', '.join(prompt_bundle['context_used'])}"})
+        else:
+            yield _sse({"step": "context", "text": "Prompt using minimal context fallback"})
+        user_text = prompt_bundle["augmented_prompt"]
         if screen_b64:
             current_parts = [
                 {"inline_data": {"mime_type": "image/png", "data": screen_b64}},

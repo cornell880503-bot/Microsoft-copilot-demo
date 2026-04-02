@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 import json as _json
 
 from agent import run_agent_stream, generate_chat_title, generate_suggestions
+from memory_store import MemoryStore
 from email_sender import send_email
 from window_context import get_active_window_title
 from rag.indexer import index_local_data
@@ -131,6 +132,21 @@ async def suggest(window: str = ""):
     active = window or get_active_window_title() or ""
     result = await generate_suggestions(active)
     return {"window": active, "suggestions": result}
+
+
+@app.get("/memory")
+async def get_memory():
+    store = MemoryStore()
+    return store.memory
+
+
+@app.delete("/memory/{key}")
+async def delete_memory(key: str):
+    store = MemoryStore()
+    deleted = store.delete(key)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Memory key not found: {key}")
+    return {"ok": True, "deleted": key}
 
 
 @app.post("/index-docs")
