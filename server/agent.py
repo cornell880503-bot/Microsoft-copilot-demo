@@ -1443,6 +1443,12 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             except (json.JSONDecodeError, TypeError):
                 action_payload = {"content": result["payload"]}
 
+            # Force .docx for document saves — model often defaults to .txt
+            if action == "SAVE_FILE":
+                fname = action_payload.get("filename", "")
+                if fname.lower().endswith(".txt"):
+                    action_payload["filename"] = fname[:-4] + ".docx"
+
             # Auto-attach logic for SEND_EMAIL
             if action == "SEND_EMAIL":
                 query = user_input.lower()
