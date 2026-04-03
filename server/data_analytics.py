@@ -24,6 +24,11 @@ class AnalyticsResult:
     body: str
 
 
+# Keywords that require actual code execution (matplotlib etc.) — never handle deterministically
+_VISUAL_TERMS = ("chart", "graph", "visual", "plot", "draw", "stacked bar", "bar chart",
+                 "pie chart", "histogram", "scatter", "heatmap", "畫圖", "圖表", "可視化")
+
+
 def _safe_pct(numerator: int, denominator: int) -> float:
     return 0.0 if denominator <= 0 else numerator / denominator * 100
 
@@ -49,7 +54,6 @@ def _clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     working = df.copy().fillna("")
     working = working.replace("missing value", "")
 
-    # Drop completely empty rows/columns first.
     working = working.replace(r"^\s*$", pd.NA, regex=True)
     working = working.dropna(axis=0, how="all").dropna(axis=1, how="all")
 
@@ -110,7 +114,6 @@ def _clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     working = working.iloc[header_row_idx + 1 :, header_positions].copy()
     working.columns = normalized_header
 
-    # Normalize obvious label/value naming.
     renamed = {}
     for col in working.columns:
         lower = str(col).strip().lower()
@@ -121,15 +124,12 @@ def _clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     if renamed:
         working = working.rename(columns=renamed)
 
-    # Drop rows that are still metadata-like or empty in the first useful columns.
     if len(working.columns) >= 2:
         first_col = working.columns[0]
-        second_col = working.columns[1]
         first_series = working[first_col].astype(str).str.strip().str.lower()
         working = working[~first_series.isin({"", "nan", "none", "null"})].copy()
         working = working[~first_series.str.contains(r"grand total|subtotal|total$", regex=True)].copy()
 
-    # Drop columns that carry almost no information after header normalization.
     keep_columns = []
     for col in working.columns:
         series = working[col]
@@ -147,7 +147,6 @@ def _clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             working[col] = working[col].astype(str).str.strip()
             working[col] = working[col].replace({"": pd.NA, "nan": pd.NA, "None": pd.NA})
 
-    # Promote textified numeric columns back to numbers.
     for col in working.columns:
         series_text = working[col].dropna().astype(str)
         lower_name = str(col).strip().lower()
@@ -199,15 +198,8 @@ def _find_identifier_columns(df: pd.DataFrame) -> list[str]:
 def _column_priority(name: str) -> tuple[int, int]:
     lower = str(name).strip().lower()
     keywords = (
-        "case_type",
-        "category",
-        "status",
-        "majority_policy",
-        "policy",
-        "vote_pattern",
-        "type",
-        "batch_name",
-        "label",
+        "case_type", "category", "status", "majority_policy",
+        "policy", "vote_pattern", "type", "batch_name", "label",
     )
     for idx, keyword in enumerate(keywords):
         if keyword in lower:
@@ -304,19 +296,16 @@ def _event_level_summary(df: pd.DataFrame) -> str:
     if secondary_col:
         unique_count = df[secondary_col].dropna().astype(str).nunique(dropna=True)
         lines.append(f"- Good segmentation column: `{secondary_col}` ({unique_count} distinct values)")
-
     if primary_col:
         lines.append("")
         lines.append(f"Top values in `{primary_col}`:")
         for label, count, pct in _top_values(df[primary_col].dropna(), topn=6):
             lines.append(f"- {label}: {count} rows ({pct:.1f}%)")
-
     if secondary_col:
         lines.append("")
         lines.append(f"Top values in `{secondary_col}`:")
         for label, count, pct in _top_values(df[secondary_col].dropna(), topn=5):
             lines.append(f"- {label}: {count} rows ({pct:.1f}%)")
-
     lines.append("")
     lines.append("Missing-data check:")
     lines.append(f"- {_missingness_summary(df)}")
@@ -326,10 +315,8 @@ def _event_level_summary(df: pd.DataFrame) -> str:
 def _key_metrics_summary(df: pd.DataFrame) -> str:
     lines = [f"Key metrics from {len(df)} rows:"]
     metric_cols = _choose_metric_columns(df)
-
     if not metric_cols:
         metric_cols = [col for col in (_choose_primary_category(df), _choose_secondary_category(df, _choose_primary_category(df))) if col]
-
     for col in metric_cols[:4]:
         series = df[col].dropna().astype(str)
         if series.empty:
@@ -338,12 +325,10 @@ def _key_metrics_summary(df: pd.DataFrame) -> str:
         lines.append(f"`{col}` distribution:")
         for label, count, pct in _top_values(series, topn=5):
             lines.append(f"- {label}: {count} rows ({pct:.1f}%)")
-
     identifier_cols = _find_identifier_columns(df)
     if identifier_cols:
         lines.append("")
         lines.append(f"Coverage: `{identifier_cols[0]}` is populated for {len(df)} / {len(df)} rows (100.0%).")
-
     missing_summary = _missingness_summary(df)
     lines.append("")
     lines.append(f"Missing-data check: {missing_summary}")
@@ -457,10 +442,8 @@ def build_spreadsheet_report(doc_path: str, request_text: str = "") -> str:
 
 def _dataset_summary(df: pd.DataFrame) -> str:
     primary_col = _choose_primary_category(df)
-    secondary_col = _choose_secondary_category(df, primary_col)
     if primary_col:
         return _event_level_summary(df)
-
     lines = [
         f"Rows: {len(df)}",
         f"Columns: {len(df.columns)}",
@@ -482,60 +465,6 @@ def _dataset_summary(df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def _chart_recommendation(df: pd.DataFrame) -> str:
-    numeric_cols = _find_numeric_columns(df)
-    categorical_cols = _find_categorical_columns(df)
-    primary_col = _choose_primary_category(df)
-    secondary_col = _choose_secondary_category(df, primary_col)
-
-    if primary_col and secondary_col and not numeric_cols:
-        return (
-            f"Recommended chart: Stacked Bar Chart\n"
-            f"Reason: this looks like row-level categorical data, so the best first view is row counts by `{primary_col}` segmented by `{secondary_col}`.\n"
-            f"Suggested mapping: x-axis = `{primary_col}`, stack = `{secondary_col}`, value = row count"
-        )
-
-    if categorical_cols and numeric_cols:
-        cat_col = categorical_cols[0]
-        num_col = numeric_cols[0]
-        if len(categorical_cols) == 1 and len(numeric_cols) == 1:
-            return (
-                f"Recommended chart: Bar Chart\n"
-                f"Reason: `{cat_col}` is the category axis and `{num_col}` is the main numeric measure, so a standard bar chart is the clearest comparison.\n"
-                f"Suggested mapping: x-axis = `{cat_col}`, value = `{num_col}`"
-            )
-        return (
-            f"Recommended chart: Stacked Bar Chart\n"
-            f"Reason: the dataset mixes categorical grouping with numeric values, so a stacked bar chart can compare grouped totals across categories.\n"
-            f"Suggested mapping: x-axis = `{cat_col}`, stacked value = `{num_col}`"
-        )
-
-    if categorical_cols:
-        cat_col = primary_col or categorical_cols[0]
-        return (
-            f"Recommended chart: Bar Chart\n"
-            f"Reason: the clearest first view is the count distribution across `{cat_col}`, since the dataset looks event-level rather than pre-aggregated.\n"
-            f"Suggested mapping: x-axis = `{cat_col}`, value = row count"
-        )
-
-    if len(numeric_cols) >= 2:
-        return (
-            f"Recommended chart: Scatter Plot\n"
-            f"Reason: the dataset has multiple numeric columns ({', '.join(numeric_cols[:3])}), so a scatter plot can show correlation or separation."
-        )
-
-    if len(numeric_cols) == 1:
-        return (
-            f"Recommended chart: Bar Chart\n"
-            f"Reason: the dataset has one primary numeric column (`{numeric_cols[0]}`), so a bar chart is the clearest default summary."
-        )
-
-    return (
-        "Recommended chart: Table Summary\n"
-        "Reason: the dataset appears mostly categorical, so a textual summary or pivot table is safer than forcing a chart."
-    )
-
-
 def _distribution_summary(df: pd.DataFrame) -> str:
     categorical_cols = _find_categorical_columns(df)
     target_col = categorical_cols[0] if categorical_cols else str(df.columns[0])
@@ -550,18 +479,17 @@ def _distribution_summary(df: pd.DataFrame) -> str:
 
 def run_deterministic_analysis(doc_path: str, user_input: str) -> AnalyticsResult:
     query = normalize_query(user_input)
+
+    # Chart/visualization requests need real matplotlib code — never handle deterministically
+    if any(term in query for term in _VISUAL_TERMS):
+        return AnalyticsResult(False, Path(doc_path).name, "")
+
     raw_df = _load_dataframe(doc_path)
     df, meta = _clean_dataframe(raw_df)
 
     intro_lines = []
     if meta.get("detected_layout") == "pivot_export":
         intro_lines.append("Detected a pivot-style export and cleaned the table before analysis.")
-
-    if any(term in query for term in ("chart", "graph", "visual", "stacked bar", "plot")):
-        body = _chart_recommendation(df)
-        if intro_lines:
-            body = "\n".join(intro_lines) + "\n\n" + body
-        return AnalyticsResult(True, Path(doc_path).name, body)
 
     if any(term in query for term in ("distribution", "breakdown", "count", "top values", "category")):
         body = _distribution_summary(df)
@@ -577,8 +505,7 @@ def run_deterministic_analysis(doc_path: str, user_input: str) -> AnalyticsResul
 
     if any(term in query for term in ("analyze", "analysis", "summarize", "summary", "python", "data")):
         summary = _dataset_summary(df)
-        chart = _chart_recommendation(df)
-        body = f"{summary}\n\n{chart}"
+        body = summary
         if intro_lines:
             body = "\n".join(intro_lines) + "\n\n" + body
         return AnalyticsResult(True, Path(doc_path).name, body)
