@@ -19,9 +19,10 @@ from contextlib import asynccontextmanager
 
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 import json as _json
@@ -73,6 +74,17 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    logger.error("Request validation error on %s: %s", request.url.path, errors)
+    # Return detail as a string so the frontend can display it
+    detail = "; ".join(
+        f"{'.'.join(str(l) for l in e['loc'])}: {e['msg']}" for e in errors
+    )
+    return JSONResponse(status_code=422, content={"detail": detail})
+
+
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class SearchRequest(BaseModel):
@@ -102,7 +114,7 @@ class AgentRequest(BaseModel):
     conversation_id: str | None = Field(None)
 
 class SaveFileRequest(BaseModel):
-    filename: str = Field(..., min_length=1, max_length=255)
+    filename: str = Field(..., min_length=1)
     content:  str = Field(...)
 
 class SendEmailRequest(BaseModel):

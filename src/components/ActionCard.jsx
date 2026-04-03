@@ -72,7 +72,9 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
-          throw new Error(err.detail || 'Failed to save file');
+          const detail = err.detail;
+          const msg = typeof detail === 'string' ? detail : JSON.stringify(detail);
+          throw new Error(msg || 'Failed to save file');
         }
       } else if (action === 'SCHEDULE_MEETING') {
         const res = await fetch(`${SIDECAR}/schedule-meeting`, {
