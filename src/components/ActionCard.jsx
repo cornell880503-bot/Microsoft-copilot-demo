@@ -183,7 +183,7 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
                 style={{ marginRight: 8, accentColor: '#D13438' }}
               />
               <span style={{ fontWeight: 500 }}>{c.name}</span>
-              {c.reason && <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>{c.reason}</span>}
+              {c.reason && <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>{c.reason.length > 60 ? c.reason.slice(0, 60) + '…' : c.reason}</span>}
             </div>
           ))}
         </div>

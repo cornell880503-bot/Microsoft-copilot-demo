@@ -1786,24 +1786,32 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 f"{i+1}. {f.name} | modified {_dt.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d')} | {f}"
                 for i, f in enumerate(found[:40])
             )
+            # Fallback: most recent 6 files (always available)
+            recent_fallback = [
+                {"path": str(f), "name": f.name, "reason": "最近修改"}
+                for f in found[:6]
+            ]
             try:
                 pick_response = client.models.generate_content(
                     model=model_name,
                     contents=(
                         f"User wants to delete a file. Their request: \"{user_input}\"\n\n"
                         f"Files available:\n{file_list}\n\n"
-                        "Return the top 3-5 most relevant candidate files the user likely wants to delete. "
+                        "Return EXACTLY 5 candidate files ranked by how likely the user wants to delete them. "
+                        "Include both close matches AND recent files so the user has options. "
+                        "reason must be SHORT (under 20 words). "
                         "Reply ONLY with valid JSON: "
-                        '{"results": [{"path": "...", "name": "...", "reason": "<why this matches>"}]}'
+                        '{"results": [{"path": "...", "name": "...", "reason": "..."}]}'
                     ),
                 )
                 pick = json.loads(_clean_json(pick_response.text))
-                candidates = pick.get("results", [])
+                ai_candidates = pick.get("results", [])
+                # Merge AI results with recent fallback; deduplicate by path
+                seen = {c["path"] for c in ai_candidates}
+                merged = ai_candidates + [c for c in recent_fallback if c["path"] not in seen]
+                candidates = merged[:6]
             except Exception:
-                candidates = [
-                    {"path": str(f), "name": f.name, "reason": "Recently modified"}
-                    for f in found[:5]
-                ]
+                candidates = recent_fallback
 
             yield _sse({
                 "step": "action_card",
