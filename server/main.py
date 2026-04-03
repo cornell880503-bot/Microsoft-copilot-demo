@@ -220,7 +220,31 @@ async def save_file(body: SaveFileRequest):
 
     save_path = Path.home() / "Downloads" / safe_name
     try:
-        save_path.write_text(body.content, encoding="utf-8")
+        ext = save_path.suffix.lower()
+        if ext == ".docx":
+            from docx import Document
+            from docx.shared import Pt
+            doc = Document()
+            # Use filename stem (without extension) as title
+            title_text = save_path.stem
+            doc.add_heading(title_text, level=0)
+            for line in body.content.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    doc.add_paragraph("")
+                elif stripped.startswith("# "):
+                    doc.add_heading(stripped[2:], level=1)
+                elif stripped.startswith("## "):
+                    doc.add_heading(stripped[3:], level=2)
+                elif stripped.startswith("### "):
+                    doc.add_heading(stripped[4:], level=3)
+                elif stripped.startswith("- ") or stripped.startswith("• "):
+                    p = doc.add_paragraph(stripped[2:], style="List Bullet")
+                else:
+                    doc.add_paragraph(stripped)
+            doc.save(str(save_path))
+        else:
+            save_path.write_text(body.content, encoding="utf-8")
         logger.info("Saved file: %s", save_path)
         return {"saved_to": str(save_path), "filename": safe_name}
     except Exception as e:

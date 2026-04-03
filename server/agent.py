@@ -89,6 +89,8 @@ CRITICAL rules for the body field:
 
 For SAVE_FILE, structure payload as JSON string:
 {"filename":"...","content":"..."}
+- Default to .docx for document summaries, notes, and reports (only use .txt for raw data or logs)
+- filename should be descriptive and in the user's language
 
 For SCHEDULE_MEETING, structure payload as JSON string:
 {"title":"...","attendees":"...","date":"YYYY-MM-DD","time":"HH:MM","duration_minutes":60,"location":"..."}
