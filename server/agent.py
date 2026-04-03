@@ -60,7 +60,7 @@ Your job is to analyze this context and choose the most useful action.
 You MUST respond with ONLY a single valid JSON object — no markdown, no explanation, no code fences:
 {
   "thought": "<1–2 sentence reasoning about what the user needs and why you chose this action>",
-  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON>",
+  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | DELETE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON>",
   "payload": "<the actual useful output: answer, drafted text, image description, email body, file content, or structured JSON>"
 }
 
@@ -72,6 +72,7 @@ Action selection rules:
 - SAVE_FILE          → user wants to save content to a file on their computer
 - SCHEDULE_MEETING   → user wants to create a calendar event or schedule a meeting
 - OPEN_APP           → user explicitly asks to LAUNCH a specific application by name (e.g. "open Spotify", "open Chrome"); NOT for finding files
+- DELETE_FILE        → user wants to delete or remove a local file by name (e.g. "delete X", "刪掉X", "remove X")
 - EXECUTE_PYTHON     → user wants to analyze, count, calculate, or process data from the active document using Python — write and run actual code (use when user says "用python", "analyze", "calculate", "count", "分析", "計算")
 
 IMPORTANT: Never use OPEN_APP to open a file — use SEARCH_LOCAL_DOCS to find it first, then the user will choose to open it themselves.
@@ -91,6 +92,10 @@ For SAVE_FILE, structure payload as JSON string:
 {"filename":"...","content":"..."}
 - Default to .docx for document summaries, notes, and reports (only use .txt for raw data or logs)
 - filename should be descriptive and in the user's language
+
+For DELETE_FILE, structure payload as JSON string:
+{"filename":"..."}
+- filename is the exact name of the file the user wants to delete (search in ~/Downloads, ~/Documents, ~/Desktop)
 
 For SCHEDULE_MEETING, structure payload as JSON string:
 {"title":"...","attendees":"...","date":"YYYY-MM-DD","time":"HH:MM","duration_minutes":60,"location":"..."}
@@ -194,7 +199,7 @@ Your job is to decide:
 
 Return ONLY a single valid JSON object:
 {
-  "action": "SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON",
+  "action": "SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | DELETE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON",
   "needs_screenshot": true,
   "needs_rag": false,
   "reason": "short reason",
@@ -1436,8 +1441,8 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
             return
 
-        # ── Action Cards (SEND_EMAIL / SAVE_FILE / SCHEDULE_MEETING / OPEN_APP) ──
-        if action in ("SEND_EMAIL", "SAVE_FILE", "SCHEDULE_MEETING", "OPEN_APP"):
+        # ── Action Cards (SEND_EMAIL / SAVE_FILE / DELETE_FILE / SCHEDULE_MEETING / OPEN_APP) ──
+        if action in ("SEND_EMAIL", "SAVE_FILE", "DELETE_FILE", "SCHEDULE_MEETING", "OPEN_APP"):
             try:
                 action_payload = json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
             except (json.JSONDecodeError, TypeError):

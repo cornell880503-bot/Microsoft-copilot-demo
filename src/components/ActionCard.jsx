@@ -15,6 +15,12 @@ const ACTION_META = {
     color: '#107C10',
     fields: ['filename', 'content'],
   },
+  DELETE_FILE: {
+    icon: '🗑️',
+    label: 'Delete File',
+    color: '#D13438',
+    fields: ['filename'],
+  },
   SCHEDULE_MEETING: {
     icon: '📅',
     label: 'Schedule Meeting',
@@ -76,6 +82,18 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
           const msg = typeof detail === 'string' ? detail : JSON.stringify(detail);
           throw new Error(msg || 'Failed to save file');
         }
+      } else if (action === 'DELETE_FILE') {
+        const res = await fetch(`${SIDECAR}/delete-file`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: fields.filename }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          const detail = err.detail;
+          const msg = typeof detail === 'string' ? detail : JSON.stringify(detail);
+          throw new Error(msg || 'Failed to delete file');
+        }
       } else if (action === 'SCHEDULE_MEETING') {
         const res = await fetch(`${SIDECAR}/schedule-meeting`, {
           method: 'POST',
@@ -109,6 +127,7 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
   const confirmedMessage = {
     SEND_EMAIL:        `Email sent to ${fields.to}${fields.attachment_path ? ' with attachment' : ''}`,
     SAVE_FILE:         `File saved to ~/Downloads/${fields.filename || 'file'}`,
+    DELETE_FILE:       `Deleted ${fields.filename || 'file'}`,
     SCHEDULE_MEETING:  `Meeting added to Calendar: ${fields.title || 'event'}`,
     OPEN_APP:          `Opened ${fields.app}${fields.action ? ` — ${fields.action}` : ''}`,
   }[action] || 'Action completed';

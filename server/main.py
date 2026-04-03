@@ -264,6 +264,46 @@ async def save_file(body: SaveFileRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class DeleteFileRequest(BaseModel):
+    filename: str = Field(..., min_length=1)
+
+
+@app.post("/delete-file")
+async def delete_file(body: DeleteFileRequest):
+    """Search for filename in standard directories and delete it."""
+    import glob as _glob
+    safe_name = Path(body.filename).name
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    search_dirs = [
+        Path.home() / "Downloads",
+        Path.home() / "Documents",
+        Path.home() / "Desktop",
+    ]
+    matches = [
+        p for d in search_dirs
+        for p in _glob.glob(str(d / "**" / safe_name), recursive=True)
+        if Path(p).is_file()
+    ]
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"File not found: {safe_name}")
+
+    deleted = []
+    for path in matches:
+        try:
+            Path(path).unlink()
+            deleted.append(path)
+            logger.info("Deleted file: %s", path)
+        except Exception as e:
+            logger.warning("Failed to delete %s: %s", path, e)
+
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Found file but could not delete it")
+
+    return {"deleted": deleted}
+
+
 class ScheduleMeetingRequest(BaseModel):
     title:            str
     attendees:        str = ""
