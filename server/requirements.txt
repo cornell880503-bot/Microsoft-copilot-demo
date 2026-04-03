@@ -22,4 +22,8 @@ pandas
 # Gemini
 google-genai
 
+# Web scraping
+requests
+beautifulsoup4
+
 # Windows-only: pip install pywin32

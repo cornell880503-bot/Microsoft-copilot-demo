@@ -600,6 +600,49 @@ end tell
         logger.warning("Numbers extraction failed: %s", e)
         return None, None
 
+_BROWSER_APPS = ("Google Chrome", "Safari", "Firefox", "Arc", "Brave Browser", "Microsoft Edge")
+
+def _get_browser_url(app: str) -> Optional[str]:
+    """Get the current URL from the active browser tab via AppleScript."""
+    try:
+        if "Chrome" in app:
+            script = 'tell application "Google Chrome" to return URL of active tab of front window'
+        elif "Safari" in app:
+            script = 'tell application "Safari" to return URL of current tab of front window'
+        elif "Arc" in app:
+            script = 'tell application "Arc" to return URL of active tab of front window'
+        elif "Brave" in app:
+            script = 'tell application "Brave Browser" to return URL of active tab of front window'
+        elif "Edge" in app:
+            script = 'tell application "Microsoft Edge" to return URL of active tab of front window'
+        else:
+            return None
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=3)
+        url = r.stdout.strip()
+        return url if url and url.startswith("http") else None
+    except Exception:
+        return None
+
+
+def _fetch_webpage_text(url: str, max_chars: int = 12000) -> Optional[str]:
+    """Fetch a webpage and return its plain text content."""
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        lines = [line for line in text.splitlines() if line.strip()]
+        return "\n".join(lines)[:max_chars]
+    except Exception as e:
+        logger.warning("Webpage fetch failed for %s: %s", url, e)
+        return None
+
+
 def _get_document_path_from_app(app: str) -> Optional[str]:
     script = _APP_DOC_SCRIPTS.get(app)
     if not script:
@@ -643,8 +686,9 @@ def _extract_text_from_file(path: str, max_chars: int = 6000) -> Optional[str]:
 
 def get_active_document_content() -> tuple[Optional[str], Optional[str]]:
     """
-    Returns (doc_text, file_path) for the document open in the active app.
+    Returns (doc_text, file_path_or_url) for the document open in the active app.
     Returns (None, None) if not available or not on macOS.
+    For browsers, fetches the actual page content from the current URL.
     """
     if sys.platform != "darwin":
         return None, None
@@ -653,6 +697,16 @@ def get_active_document_content() -> tuple[Optional[str], Optional[str]]:
         return None, None
     if app == "Numbers":
         return _extract_numbers_table()
+    # Browser: fetch actual web page content via URL
+    if any(browser in app for browser in _BROWSER_APPS):
+        url = _get_browser_url(app)
+        if url:
+            logger.info("Browser detected (%s), fetching URL: %s", app, url)
+            text = _fetch_webpage_text(url)
+            if text:
+                logger.info("Fetched %d chars from %s", len(text), url)
+                return text, url
+        return None, None
     path = _get_document_path_from_app(app)
     if not path:
         return None, None
