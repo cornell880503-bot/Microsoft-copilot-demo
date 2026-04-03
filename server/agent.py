@@ -1749,6 +1749,70 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             else:
                 yield _sse({"step": "heal", "text": "No files found in Downloads, Documents or Desktop."})
 
+        # ── DELETE_FILE: search dirs, rank candidates, let user pick ─────────
+        if action == "DELETE_FILE":
+            yield _sse({"step": "search", "text": "Scanning Downloads, Documents, Desktop for matching files..."})
+            search_dirs = [
+                Path.home() / "Downloads",
+                Path.home() / "Documents",
+                Path.home() / "Desktop",
+            ]
+            extra = os.getenv("EXTRA_DATA_DIRS", "")
+            for p in extra.split(":"):
+                if p.strip():
+                    search_dirs.append(Path(p.strip()).expanduser())
+
+            found = []
+            for folder in search_dirs:
+                if not folder.exists():
+                    continue
+                for ext in ("*.pdf", "*.docx", "*.doc", "*.txt", "*.md",
+                            "*.xlsx", "*.xls", "*.csv", "*.pptx", "*.ppt",
+                            "*.pages", "*.numbers", "*.key", "*.ics", "*.png", "*.jpg"):
+                    for f in folder.glob(ext):
+                        found.append(f)
+
+            if not found:
+                yield _sse({"step": "heal", "text": "No files found in Downloads, Documents or Desktop."})
+                yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
+                return
+
+            from datetime import datetime as _dt
+            found.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+            yield _sse({"step": "search", "text": f"Found {len(found)} file(s) — ranking by relevance to your request..."})
+
+            file_list = "\n".join(
+                f"{i+1}. {f.name} | modified {_dt.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d')} | {f}"
+                for i, f in enumerate(found[:40])
+            )
+            try:
+                pick_response = client.models.generate_content(
+                    model=model_name,
+                    contents=(
+                        f"User wants to delete a file. Their request: \"{user_input}\"\n\n"
+                        f"Files available:\n{file_list}\n\n"
+                        "Return the top 3-5 most relevant candidate files the user likely wants to delete. "
+                        "Reply ONLY with valid JSON: "
+                        '{"results": [{"path": "...", "name": "...", "reason": "<why this matches>"}]}'
+                    ),
+                )
+                pick = json.loads(_clean_json(pick_response.text))
+                candidates = pick.get("results", [])
+            except Exception:
+                candidates = [
+                    {"path": str(f), "name": f.name, "reason": "Recently modified"}
+                    for f in found[:5]
+                ]
+
+            yield _sse({
+                "step": "action_card",
+                "thought": result["thought"],
+                "action": "DELETE_FILE",
+                "payload": {"candidates": candidates},
+            })
+            yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
+            return
+
         yield _sse({"step": "result", **result})
         yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
 

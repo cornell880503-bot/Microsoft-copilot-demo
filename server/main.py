@@ -265,43 +265,30 @@ async def save_file(body: SaveFileRequest):
 
 
 class DeleteFileRequest(BaseModel):
-    filename: str = Field(..., min_length=1)
+    path: str = Field(..., min_length=1)  # full absolute path returned from candidate list
 
 
 @app.post("/delete-file")
 async def delete_file(body: DeleteFileRequest):
-    """Search for filename in standard directories and delete it."""
-    import glob as _glob
-    safe_name = Path(body.filename).name
-    if not safe_name:
-        raise HTTPException(status_code=400, detail="Invalid filename")
+    """Delete a file by its full path (must be under home directory)."""
+    target = Path(body.path).resolve()
+    home = Path.home().resolve()
 
-    search_dirs = [
-        Path.home() / "Downloads",
-        Path.home() / "Documents",
-        Path.home() / "Desktop",
-    ]
-    matches = [
-        p for d in search_dirs
-        for p in _glob.glob(str(d / "**" / safe_name), recursive=True)
-        if Path(p).is_file()
-    ]
-    if not matches:
-        raise HTTPException(status_code=404, detail=f"File not found: {safe_name}")
+    # Safety: only allow deleting files inside the user's home directory
+    if not str(target).startswith(str(home)):
+        raise HTTPException(status_code=403, detail="Can only delete files inside your home directory")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {target.name}")
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail="Path is not a file")
 
-    deleted = []
-    for path in matches:
-        try:
-            Path(path).unlink()
-            deleted.append(path)
-            logger.info("Deleted file: %s", path)
-        except Exception as e:
-            logger.warning("Failed to delete %s: %s", path, e)
-
-    if not deleted:
-        raise HTTPException(status_code=500, detail="Found file but could not delete it")
-
-    return {"deleted": deleted}
+    try:
+        target.unlink()
+        logger.info("Deleted file: %s", target)
+        return {"deleted": str(target), "filename": target.name}
+    except Exception as e:
+        logger.exception("Failed to delete file")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 class ScheduleMeetingRequest(BaseModel):

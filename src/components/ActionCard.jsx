@@ -19,7 +19,7 @@ const ACTION_META = {
     icon: '🗑️',
     label: 'Delete File',
     color: '#D13438',
-    fields: ['filename'],
+    fields: [],
   },
   SCHEDULE_MEETING: {
     icon: '📅',
@@ -39,6 +39,9 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
   const meta   = ACTION_META[action] || { icon: '⚡', label: action, color: '#8661C5', fields: [] };
   const [fields, setFields] = useState(
     typeof payload === 'object' ? payload : { content: payload }
+  );
+  const [selectedPath, setSelectedPath] = useState(
+    action === 'DELETE_FILE' && payload?.candidates?.length > 0 ? payload.candidates[0].path : null
   );
   const [editing, setEditing]     = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -83,10 +86,11 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
           throw new Error(msg || 'Failed to save file');
         }
       } else if (action === 'DELETE_FILE') {
+        if (!selectedPath) throw new Error('Please select a file to delete');
         const res = await fetch(`${SIDECAR}/delete-file`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: fields.filename }),
+          body: JSON.stringify({ path: selectedPath }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
@@ -127,7 +131,7 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
   const confirmedMessage = {
     SEND_EMAIL:        `Email sent to ${fields.to}${fields.attachment_path ? ' with attachment' : ''}`,
     SAVE_FILE:         `File saved to ~/Downloads/${fields.filename || 'file'}`,
-    DELETE_FILE:       `Deleted ${fields.filename || 'file'}`,
+    DELETE_FILE:       `Deleted ${selectedPath ? selectedPath.split('/').pop() : 'file'}`,
     SCHEDULE_MEETING:  `Meeting added to Calendar: ${fields.title || 'event'}`,
     OPEN_APP:          `Opened ${fields.app}${fields.action ? ` — ${fields.action}` : ''}`,
   }[action] || 'Action completed';
@@ -161,24 +165,50 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
       {/* Thought */}
       {thought && <div className="action-card-thought">💭 {thought}</div>}
 
-      {/* Fields */}
-      <div className="action-card-fields">
-        {Object.entries(fields).map(([key, val]) => (
-          <div key={key} className="action-field">
-            <span className="action-field-label">{key}</span>
-            {editing ? (
-              <textarea
-                className="action-field-input"
-                value={val}
-                rows={key === 'body' || key === 'content' ? 4 : 1}
-                onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
+      {/* DELETE_FILE: candidate file picker */}
+      {action === 'DELETE_FILE' && fields.candidates?.length > 0 && (
+        <div className="action-card-fields">
+          {fields.candidates.map((c) => (
+            <div
+              key={c.path}
+              className="action-field"
+              style={{ cursor: 'pointer', background: selectedPath === c.path ? 'rgba(209,52,56,0.08)' : 'transparent', borderRadius: 6, padding: '4px 8px' }}
+              onClick={() => setSelectedPath(c.path)}
+            >
+              <input
+                type="radio"
+                name="delete-candidate"
+                checked={selectedPath === c.path}
+                onChange={() => setSelectedPath(c.path)}
+                style={{ marginRight: 8, accentColor: '#D13438' }}
               />
-            ) : (
-              <span className="action-field-value">{val}</span>
-            )}
-          </div>
-        ))}
-      </div>
+              <span style={{ fontWeight: 500 }}>{c.name}</span>
+              {c.reason && <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>{c.reason}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Normal fields (non-DELETE_FILE) */}
+      {action !== 'DELETE_FILE' && (
+        <div className="action-card-fields">
+          {Object.entries(fields).map(([key, val]) => (
+            <div key={key} className="action-field">
+              <span className="action-field-label">{key}</span>
+              {editing ? (
+                <textarea
+                  className="action-field-input"
+                  value={val}
+                  rows={key === 'body' || key === 'content' ? 4 : 1}
+                  onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
+                />
+              ) : (
+                <span className="action-field-value">{val}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Error */}
       {error && (
@@ -192,9 +222,11 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
         <button className="action-btn action-btn-confirm" onClick={handleConfirm} disabled={sending}>
           {sending ? '⏳ Sending…' : '✓ Confirm'}
         </button>
-        <button className="action-btn action-btn-edit" onClick={() => setEditing((v) => !v)} disabled={sending}>
-          {editing ? '✓ Done' : '✏ Edit'}
-        </button>
+        {action !== 'DELETE_FILE' && (
+          <button className="action-btn action-btn-edit" onClick={() => setEditing((v) => !v)} disabled={sending}>
+            {editing ? '✓ Done' : '✏ Edit'}
+          </button>
+        )}
         <button className="action-btn action-btn-cancel" onClick={handleCancel} disabled={sending}>
           ✕ Cancel
         </button>
