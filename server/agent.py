@@ -1513,9 +1513,11 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 if doc_path:
                     yield _sse({"step": "context", "text": f"Re-detected document: {Path(doc_path).name}"})
 
-            if not doc_path:
-                yield _sse({"step": "error", "text": "Could not detect an open document. Please make sure the file is open and active."})
-                return
+            # If doc_path is a URL (browser was active), it's not a local file — discard it
+            if doc_path and (doc_path.startswith("http://") or doc_path.startswith("https://")):
+                logger.info("doc_path is a URL, discarding for EXECUTE_PYTHON: %s", doc_path)
+                doc_path = None
+                doc_text = None
 
             # Fast path: deterministic analytics for common spreadsheet questions.
             try:
@@ -1536,33 +1538,45 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 return
 
             # Step 2: dedicated code-generation call (plain text, no JSON wrapper)
-            ext = Path(doc_path).suffix.lower()
-            read_snippet = (
-                "pd.read_csv(os.environ['DOC_PATH'])" if ext == ".csv"
-                else "pd.read_excel(os.environ['DOC_PATH'])" if ext in (".xlsx", ".xls")
-                else "open(os.environ['DOC_PATH']).read()"
-            )
-            # Pass header + first 3 data rows so AI can see actual values per column
-            col_hint = ""
-            if doc_text:
-                preview_lines = doc_text.splitlines()[:4]  # header + 3 rows
-                col_hint = "File preview (header + first 3 rows):\n" + "\n".join(preview_lines) + "\n"
+            if doc_path:
+                ext = Path(doc_path).suffix.lower()
+                read_snippet = (
+                    "pd.read_csv(os.environ['DOC_PATH'])" if ext == ".csv"
+                    else "pd.read_excel(os.environ['DOC_PATH'])" if ext in (".xlsx", ".xls")
+                    else "open(os.environ['DOC_PATH']).read()"
+                )
+                col_hint = ""
+                if doc_text:
+                    preview_lines = doc_text.splitlines()[:4]
+                    col_hint = "File preview (header + first 3 rows):\n" + "\n".join(preview_lines) + "\n"
+                file_context = (
+                    f"File: {Path(doc_path).name} (full path in os.environ['DOC_PATH'])\n"
+                    f"Read it with: {read_snippet}\n"
+                    f"{col_hint}\n"
+                )
+            else:
+                file_context = (
+                    "No specific file is currently open. If the user mentions a filename,\n"
+                    "search for it in these directories: ~/Downloads, ~/Documents, ~/Desktop\n"
+                    "Example search:\n"
+                    "  import glob, os\n"
+                    "  target = 'filename.txt'\n"
+                    "  dirs = [os.path.expanduser(d) for d in ['~/Downloads','~/Documents','~/Desktop']]\n"
+                    "  matches = [p for d in dirs for p in glob.glob(os.path.join(d, '**', target), recursive=True)]\n"
+                    "  path = matches[0] if matches else None\n"
+                )
             code_resp, _ = _generate_with_fallback(
                 client, model_name, fallback_model,
                 contents=(
                     f"Write Python code to answer this request: {user_input}\n\n"
-                    f"File: {Path(doc_path).name} (full path in os.environ['DOC_PATH'])\n"
-                    f"Read it with: {read_snippet}\n"
-                    f"{col_hint}\n"
+                    f"{file_context}"
                     "Rules:\n"
                     "- Import os and any needed libraries at the top\n"
-                    "- Read the file using the env var, never hardcode data\n"
                     "- NEVER install packages, call pip, use subprocess for package installation, or download dependencies\n"
-                    "- If a plotting library is unavailable, fall back to a textual recommendation instead of installing anything\n"
                     "- If saving a file, ALWAYS save to os.path.expanduser('~/Downloads/'), never to /download or /Downloads\n"
                     "- Print results in friendly, human-readable Chinese if the query is in Chinese\n"
                     "- Use clear labels, counts AND percentages, e.g. 'majority: 26筆 (89.7%)'\n"
-                    "- Always print a final user-facing analysis summary; do not print setup logs\n"
+                    "- Always print a final user-facing summary; do not print setup logs\n"
                     "- NO code blocks, NO variable dumps — only clean human-readable output\n"
                     "- Output ONLY executable Python code, no markdown, no explanation"
                 ),
@@ -1578,9 +1592,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     contents=(
                         f"The previous Python code attempted to install packages, which is not allowed.\n\n"
                         f"User request: {user_input}\n"
-                        f"File: {Path(doc_path).name} (full path in os.environ['DOC_PATH'])\n"
-                        f"Read it with: {read_snippet}\n"
-                        f"{col_hint}\n"
+                        f"{file_context}"
                         "Return replacement code that does NOT install anything.\n"
                         "If extra plotting libraries are unavailable, print a textual chart recommendation and the reason.\n"
                         "Always print a concise final analysis summary for the user.\n"
@@ -1598,7 +1610,8 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 tmp = Path(tempfile.mktemp(suffix=".py"))
                 tmp.write_text(code_str, encoding="utf-8")
                 exec_env = os.environ.copy()
-                exec_env["DOC_PATH"] = doc_path
+                if doc_path:
+                    exec_env["DOC_PATH"] = doc_path
                 try:
                     p = __import__("subprocess").run(
                         [sys.executable, str(tmp)],
@@ -1640,9 +1653,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                             f"This Python code ran successfully but produced no user-facing output.\n\n"
                             f"```python\n{code}\n```\n\n"
                             f"User request: {user_input}\n"
-                            f"File: {Path(doc_path).name} (full path in os.environ['DOC_PATH'])\n"
-                            f"Read it with: {read_snippet}\n"
-                            f"{col_hint}\n"
+                            f"{file_context}"
                             "Return replacement code that MUST print a concise final answer for the user.\n"
                             "Do not save files unless the user explicitly asked.\n"
                             "If recommending a chart, print the recommendation and short reasoning.\n"
