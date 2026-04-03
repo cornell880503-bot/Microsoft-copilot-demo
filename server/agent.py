@@ -27,7 +27,7 @@ from google import genai
 from google.genai import types
 
 from context_provider import ContextProvider
-from data_analytics import run_deterministic_analysis
+from data_analytics import run_deterministic_analysis, build_spreadsheet_report
 from memory_store import MemoryStore
 from privacy_mode import ENHANCED_MODE, load_privacy_mode
 from prompt_builder import PromptBuilder
@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL        = "gemini-3-flash-preview"
 FALLBACK_MODEL       = "gemini-2.5-flash"   # fallback when primary is overloaded
 ROUTER_MODEL         = "gemini-2.5-flash"
+ROUTER_FALLBACK_MODEL = "gemini-3-flash-preview"
 IMAGE_MODEL          = "gemini-3.1-flash-image-preview"
 IMAGE_MODEL_FALLBACK = "gemini-2.0-flash-exp-image-generation"
 
@@ -187,18 +188,22 @@ Your job is to decide:
 1. which action the system should take
 2. whether the task needs a screenshot
 3. whether the task needs local RAG search
+4. the shortest useful execution plan
 
 Return ONLY a single valid JSON object:
 {
   "action": "SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON",
   "needs_screenshot": true,
   "needs_rag": false,
-  "reason": "short reason"
+  "reason": "short reason",
+  "plan": "short execution plan"
 }
 
 Routing principles:
 - Use EXECUTE_PYTHON for spreadsheet/file analysis, counting, chart selection, metrics analysis, and structured data work.
 - Use DRAFT_CONTENT for normal writing, explanation, summarization, and interpretation.
+- When the user asks for a multi-step outcome, pick the action that best represents the final user-facing step and use `plan` to describe the sub-steps.
+- Prefer model-based intent understanding over brittle keyword shortcuts.
 - Set needs_screenshot=true only when the visible screen content is likely necessary to answer correctly.
 - Set needs_rag=true only when local knowledge-base retrieval is likely relevant.
 - Prefer low-latency routing. Do not request screenshot or RAG unless they are actually useful.
@@ -211,44 +216,8 @@ class IntentPlan:
     needs_screenshot: bool
     needs_rag: bool
     reason: str
+    plan: str
     source: str
-
-
-def _spreadsheet_analysis_shortcut(active_window: str, user_input: str) -> IntentPlan | None:
-    window = normalize_query(active_window)
-    query = normalize_query(user_input)
-    spreadsheet_apps = ("numbers", "excel", "sheets", "spreadsheet", "csv")
-    analysis_terms = (
-        "analyze", "analysis", "chart", "graph", "python", "count", "calculate",
-        "distribution", "breakdown", "summarize this data", "metric", "plot",
-        "分析", "計算", "圖表", "統計", "資料"
-    )
-    if any(app in window for app in spreadsheet_apps) and any(term in query for term in analysis_terms):
-        return IntentPlan(
-            action="EXECUTE_PYTHON",
-            needs_screenshot=False,
-            needs_rag=False,
-            reason="Spreadsheet analysis detected, so route directly to Python without screenshot or RAG.",
-            source="heuristic",
-        )
-    return None
-
-
-def _screen_help_shortcut(user_input: str) -> IntentPlan | None:
-    query = normalize_query(user_input)
-    screen_terms = (
-        "what is this", "what's this", "look at this", "看看這", "這在寫啥",
-        "what am i looking at", "explain this screen", "what does this say",
-    )
-    if any(term in query for term in screen_terms):
-        return IntentPlan(
-            action="DRAFT_CONTENT",
-            needs_screenshot=True,
-            needs_rag=False,
-            reason="The user is explicitly asking about visible screen content.",
-            source="heuristic",
-        )
-    return None
 
 
 def _coerce_intent_plan(payload: dict, source: str) -> IntentPlan:
@@ -258,15 +227,12 @@ def _coerce_intent_plan(payload: dict, source: str) -> IntentPlan:
         needs_screenshot=bool(payload.get("needs_screenshot")),
         needs_rag=bool(payload.get("needs_rag")),
         reason=str(payload.get("reason", "")).strip() or "No reason provided.",
+        plan=str(payload.get("plan", "")).strip() or "No execution plan provided.",
         source=source,
     )
 
 
 def _route_intent_fast(active_window: str, user_input: str) -> IntentPlan:
-    shortcut = _spreadsheet_analysis_shortcut(active_window, user_input) or _screen_help_shortcut(user_input)
-    if shortcut:
-        return shortcut
-
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         return IntentPlan(
@@ -274,12 +240,13 @@ def _route_intent_fast(active_window: str, user_input: str) -> IntentPlan:
             needs_screenshot=False,
             needs_rag=False,
             reason="No API key available, so using a minimal default route.",
+            plan="Answer directly with the context already available.",
             source="fallback",
         )
 
     client = genai.Client(api_key=api_key)
     router_model = os.getenv("GEMINI_ROUTER_MODEL", ROUTER_MODEL)
-    fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", FALLBACK_MODEL)
+    fallback_model = os.getenv("GEMINI_ROUTER_FALLBACK_MODEL", ROUTER_FALLBACK_MODEL)
     response, used_model = _generate_with_fallback(
         client,
         router_model,
@@ -1064,6 +1031,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             needs_screenshot=False,
             needs_rag=False,
             reason="Router failed, so falling back to the default path.",
+            plan="Answer directly with the context already available.",
             source="fallback",
         )
     yield _sse({
@@ -1076,6 +1044,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         ),
     })
     yield _sse({"step": "decision", "text": f"Fast router reason: {intent_plan.reason}"})
+    yield _sse({"step": "decision", "text": f"Fast router plan: {intent_plan.plan}"})
 
     # Read active document context early because it can affect downstream execution,
     # especially for spreadsheet analysis routed to Python.
@@ -1488,7 +1457,21 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     else:
                         logger.warning("User mentioned image but no generated image found on disk")
 
-                # 2. CV attachment: filesystem scan for resume PDFs
+                # 2. Spreadsheet report attachment: generate a real Word report with embedded chart.
+                elif (
+                    doc_path
+                    and Path(doc_path).suffix.lower() in {".xlsx", ".xls", ".csv"}
+                    and any(kw in query for kw in {"word", "docx", "document", "文檔", "文件", "報告", "report"})
+                ):
+                    try:
+                        report_path = build_spreadsheet_report(doc_path, user_input)
+                        action_payload["attachment_path"] = report_path
+                        logger.info("Auto-attaching generated spreadsheet report: %s", report_path)
+                        yield _sse({"step": "search", "text": f"Generated report attachment: {Path(report_path).name}"})
+                    except Exception as exc:
+                        logger.warning("Failed to generate spreadsheet report attachment: %s", exc)
+
+                # 3. CV attachment: filesystem scan for resume PDFs
                 elif any(kw in query for kw in {"cv", "resume", "curriculum vitae"}):
                     logger.info("CV email detected; action_payload attachment_path=%r", action_payload.get("attachment_path"))
                     pdf_path = _find_cv_file()
@@ -1499,7 +1482,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     else:
                         logger.warning("No CV file found on filesystem")
 
-                # 3. Always clear any hallucinated path from Gemini
+                # 4. Always clear any hallucinated path from Gemini
                 elif not action_payload.get("attachment_path") or not Path(str(action_payload.get("attachment_path", ""))).exists():
                     action_payload["attachment_path"] = None
 

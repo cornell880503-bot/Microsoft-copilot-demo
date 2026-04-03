@@ -2,8 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
+import tempfile
 
+import matplotlib
 import pandas as pd
+from docx import Document
+from docx.shared import Inches
+
+os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp(prefix="copilot_mpl_"))
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from query_normalizer import normalize_query
 
@@ -339,6 +348,111 @@ def _key_metrics_summary(df: pd.DataFrame) -> str:
     lines.append("")
     lines.append(f"Missing-data check: {missing_summary}")
     return "\n".join(lines)
+
+
+def _build_chart_asset(df: pd.DataFrame, output_path: Path) -> tuple[Path | None, str]:
+    primary_col = _choose_primary_category(df)
+    secondary_col = _choose_secondary_category(df, primary_col)
+    numeric_cols = _find_numeric_columns(df)
+
+    try:
+        fig, ax = plt.subplots(figsize=(10, 5.6))
+        if primary_col and secondary_col and not numeric_cols:
+            plot_df = (
+                df[[primary_col, secondary_col]]
+                .dropna()
+                .astype(str)
+                .groupby([primary_col, secondary_col])
+                .size()
+                .reset_index(name="count")
+            )
+            top_primary = (
+                plot_df.groupby(primary_col)["count"].sum().sort_values(ascending=False).head(8).index.tolist()
+            )
+            top_secondary = (
+                plot_df.groupby(secondary_col)["count"].sum().sort_values(ascending=False).head(6).index.tolist()
+            )
+            plot_df = plot_df[plot_df[primary_col].isin(top_primary) & plot_df[secondary_col].isin(top_secondary)]
+            pivot = plot_df.pivot(index=primary_col, columns=secondary_col, values="count").fillna(0)
+            pivot = pivot.loc[top_primary[: len(pivot.index)]]
+            pivot.plot(kind="bar", stacked=True, ax=ax)
+            ax.set_title(f"{primary_col} by {secondary_col}")
+            ax.set_xlabel(primary_col)
+            ax.set_ylabel("Row count")
+            chart_note = f"Stacked bar chart of `{primary_col}` segmented by `{secondary_col}`."
+        elif primary_col:
+            counts = df[primary_col].dropna().astype(str).value_counts().head(10)
+            counts.sort_values(ascending=True).plot(kind="barh", ax=ax)
+            ax.set_title(f"Top values in {primary_col}")
+            ax.set_xlabel("Row count")
+            ax.set_ylabel(primary_col)
+            chart_note = f"Bar chart showing the top categories in `{primary_col}`."
+        elif numeric_cols:
+            df[numeric_cols[0]].dropna().plot(kind="hist", bins=20, ax=ax)
+            ax.set_title(f"Distribution of {numeric_cols[0]}")
+            ax.set_xlabel(numeric_cols[0])
+            chart_note = f"Histogram of numeric column `{numeric_cols[0]}`."
+        else:
+            plt.close(fig)
+            return None, "No suitable chart could be generated from the current table."
+
+        plt.tight_layout()
+        fig.savefig(output_path, dpi=180, bbox_inches="tight")
+        plt.close(fig)
+        return output_path, chart_note
+    except Exception:
+        plt.close("all")
+        return None, "Chart generation was skipped because the current table structure did not support a reliable plot."
+
+
+def build_spreadsheet_report(doc_path: str, request_text: str = "") -> str:
+    path = Path(doc_path)
+    raw_df = _load_dataframe(doc_path)
+    df, meta = _clean_dataframe(raw_df)
+
+    title = path.stem
+    summary = _dataset_summary(df)
+    metrics = _key_metrics_summary(df)
+    chart_advice = _chart_recommendation(df)
+
+    output_dir = Path(tempfile.gettempdir())
+    report_path = output_dir / f"{title} Analysis Report.docx"
+    chart_path = output_dir / f"{title} Analysis Chart.png"
+
+    generated_chart, chart_note = _build_chart_asset(df, chart_path)
+
+    doc = Document()
+    doc.add_heading(f"{title} 分析報告", level=0)
+    if request_text.strip():
+        doc.add_paragraph(f"Request: {request_text.strip()}")
+    doc.add_paragraph(f"Source file: {path.name}")
+
+    if meta.get("detected_layout") == "pivot_export":
+        doc.add_paragraph("Detected a pivot-style export and normalized the table before analysis.")
+
+    doc.add_heading("Key Metrics", level=1)
+    for line in metrics.splitlines():
+        doc.add_paragraph(line)
+
+    doc.add_heading("Dataset Readout", level=1)
+    for line in summary.splitlines():
+        doc.add_paragraph(line)
+
+    doc.add_heading("Chart Recommendation", level=1)
+    for line in chart_advice.splitlines():
+        doc.add_paragraph(line)
+
+    doc.add_heading("Embedded Chart", level=1)
+    doc.add_paragraph(chart_note)
+    if generated_chart and generated_chart.exists():
+        doc.add_picture(str(generated_chart), width=Inches(6.5))
+
+    doc.save(report_path)
+
+    if generated_chart and generated_chart.exists():
+        generated_chart.unlink(missing_ok=True)
+
+    return str(report_path)
 
 
 def _dataset_summary(df: pd.DataFrame) -> str:
