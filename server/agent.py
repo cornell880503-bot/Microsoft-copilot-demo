@@ -1441,8 +1441,9 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
             return
 
-        # ── Action Cards (SEND_EMAIL / SAVE_FILE / DELETE_FILE / SCHEDULE_MEETING / OPEN_APP) ──
-        if action in ("SEND_EMAIL", "SAVE_FILE", "DELETE_FILE", "SCHEDULE_MEETING", "OPEN_APP"):
+        # ── Action Cards (SEND_EMAIL / SAVE_FILE / SCHEDULE_MEETING / OPEN_APP) ──
+        # NOTE: DELETE_FILE is handled separately below (needs file search + candidate list)
+        if action in ("SEND_EMAIL", "SAVE_FILE", "SCHEDULE_MEETING", "OPEN_APP"):
             try:
                 action_payload = json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
             except (json.JSONDecodeError, TypeError):
