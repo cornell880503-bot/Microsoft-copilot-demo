@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL        = "gemini-3-flash-preview"
 FALLBACK_MODEL       = "gemini-2.5-flash"   # fallback when primary is overloaded
-ROUTER_MODEL         = "gemini-2.0-flash-lite"
+ROUTER_MODEL         = "gemini-2.5-flash"
 ROUTER_FALLBACK_MODEL = "gemini-3-flash-preview"
 IMAGE_MODEL          = "gemini-3.1-flash-image-preview"
 IMAGE_MODEL_FALLBACK = "gemini-2.0-flash-exp-image-generation"
