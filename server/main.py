@@ -34,6 +34,7 @@ from email_sender import send_email
 from window_context import get_active_window_title
 from rag.indexer import index_local_data
 from rag.searcher import search_docs
+from action_ledger import ledger
 import chats as chats_store
 
 load_dotenv(Path(__file__).parent / ".env")
@@ -52,6 +53,7 @@ logger = logging.getLogger("copilot.server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    ledger.clear_backups()   # clear stale backups from previous session
     logger.info("Copilot sidecar starting on http://localhost:8765")
     yield
     logger.info("Copilot sidecar shutting down")
@@ -232,6 +234,8 @@ async def save_file(body: SaveFileRequest):
 
     save_path = Path.home() / "Downloads" / safe_name
     try:
+        # Snapshot before writing so the user can undo
+        entry = ledger.snapshot(str(save_path), "SAVE_FILE", safe_name)
         ext = save_path.suffix.lower()
         if ext == ".docx":
             from docx import Document
@@ -257,6 +261,7 @@ async def save_file(body: SaveFileRequest):
             doc.save(str(save_path))
         else:
             save_path.write_text(body.content, encoding="utf-8")
+        ledger.push(entry)
         logger.info("Saved file: %s", save_path)
         return {"saved_to": str(save_path), "filename": safe_name}
     except Exception as e:
@@ -283,12 +288,25 @@ async def delete_file(body: DeleteFileRequest):
         raise HTTPException(status_code=400, detail="Path is not a file")
 
     try:
+        entry = ledger.snapshot_deletion(str(target), target.name)
         target.unlink()
+        if entry:
+            ledger.push(entry)
         logger.info("Deleted file: %s", target)
         return {"deleted": str(target), "filename": target.name}
     except Exception as e:
         logger.exception("Failed to delete file")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/undo")
+async def undo_last_action():
+    """
+    Directly reverse the last state-mutating action without going through the LLM.
+    Called by the GUI Undo button and Cmd+Z keyboard shortcut.
+    """
+    success, message = ledger.undo()
+    return {"success": success, "message": message}
 
 
 class ScheduleMeetingRequest(BaseModel):
@@ -343,7 +361,9 @@ async def schedule_meeting(body: ScheduleMeetingRequest):
     )
 
     ics_path = Path(tempfile.gettempdir()) / "copilot_meeting.ics"
+    entry = ledger.snapshot(str(ics_path), "SCHEDULE_MEETING", body.title)
     ics_path.write_text(ics, encoding="utf-8")
+    ledger.push(entry)
 
     try:
         subprocess.run(["open", str(ics_path)], check=True, timeout=5)

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const SIDECAR = 'http://127.0.0.1:8765';
 
@@ -48,6 +48,33 @@ export default function ActionCard({ thought, action, payload, displayMode = 'de
   const [cancelled, setCancelled] = useState(false);
   const [error, setError]         = useState('');
   const [sending, setSending]     = useState(false);
+  const [undone, setUndone]       = useState(false);
+  const [undoMsg, setUndoMsg]     = useState('');
+  const [undoing, setUndoing]     = useState(false);
+
+  const UNDOABLE = new Set(['SAVE_FILE', 'DELETE_FILE', 'SCHEDULE_MEETING']);
+
+  const handleUndo = async () => {
+    setUndoing(true);
+    try {
+      const res = await fetch(`${SIDECAR}/undo`, { method: 'POST' });
+      const data = await res.json();
+      setUndoMsg(data.message || (data.success ? '✅ Undone.' : '❌ Undo failed.'));
+      if (data.success) setUndone(true);
+    } catch {
+      setUndoMsg('❌ Could not reach server.');
+    } finally {
+      setUndoing(false);
+    }
+  };
+
+  // Expose undo handler globally so Cmd+Z can call it
+  useEffect(() => {
+    if (confirmed && UNDOABLE.has(action)) {
+      window.__copilotLastUndo = handleUndo;
+    }
+    return () => { if (window.__copilotLastUndo === handleUndo) window.__copilotLastUndo = null; };
+  }, [confirmed, action]);
 
   const handleCancel = () => {
     setCancelled(true);
@@ -141,10 +168,32 @@ export default function ActionCard({ thought, action, payload, displayMode = 'de
   }
 
   if (confirmed) {
+    if (undone) {
+      return (
+        <div className="action-card action-card-confirmed" style={{ '--action-color': '#8661C5' }}>
+          <span className="action-confirmed-icon">↩</span>
+          <span>{undoMsg}</span>
+        </div>
+      );
+    }
     return (
       <div className="action-card action-card-confirmed">
         <span className="action-confirmed-icon">✓</span>
-        <span>{confirmedMessage}</span>
+        <span style={{ flex: 1 }}>{confirmedMessage}</span>
+        {UNDOABLE.has(action) && !undone && (
+          <button
+            onClick={handleUndo}
+            disabled={undoing}
+            style={{
+              marginLeft: 12, padding: '2px 10px', fontSize: 11, borderRadius: 5,
+              border: '1px solid rgba(0,0,0,0.15)', background: 'rgba(0,0,0,0.06)',
+              cursor: 'pointer', color: 'inherit', opacity: undoing ? 0.5 : 1,
+            }}
+          >
+            {undoing ? '…' : '↩ Undo'}
+          </button>
+        )}
+        {undoMsg && <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.7 }}>{undoMsg}</span>}
       </div>
     );
   }

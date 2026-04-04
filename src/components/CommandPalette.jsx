@@ -200,6 +200,22 @@ export default function CommandPalette() {
     setThoughts((prev) => [...prev, { id: nextId(), ...t }]);
   }, []);
 
+  // ── Global Cmd+Z / Ctrl+Z undo shortcut ─────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const isMac    = navigator.platform.toUpperCase().includes('MAC');
+      const modifier = isMac ? e.metaKey : e.ctrlKey;
+      if (!modifier || e.key !== 'z') return;
+      // Only fire if the most recent action card was undoable
+      if (typeof window.__copilotLastUndo === 'function') {
+        e.preventDefault();
+        window.__copilotLastUndo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // ── Proactive suggestions: poll active window every 5s ──────
   useEffect(() => {
     let cancelled = false;

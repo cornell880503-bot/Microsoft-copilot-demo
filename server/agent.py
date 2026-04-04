@@ -26,6 +26,7 @@ from typing import AsyncGenerator
 from google import genai
 from google.genai import types
 
+from action_ledger import ledger
 from context_provider import ContextProvider
 from data_analytics import run_deterministic_analysis, build_spreadsheet_report
 from memory_store import MemoryStore
@@ -60,7 +61,7 @@ Your job is to analyze this context and choose the most useful action.
 You MUST respond with ONLY a single valid JSON object — no markdown, no explanation, no code fences:
 {
   "thought": "<1–2 sentence reasoning about what the user needs and why you chose this action>",
-  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | DELETE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON>",
+  "action": "<exactly one of: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | DELETE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON | UNDO_ACTION>",
   "payload": "<the actual useful output: answer, drafted text, image description, email body, file content, or structured JSON>"
 }
 
@@ -73,6 +74,7 @@ Action selection rules:
 - SCHEDULE_MEETING   → user wants to create a calendar event or schedule a meeting
 - OPEN_APP           → user explicitly asks to LAUNCH a specific application by name (e.g. "open Spotify", "open Chrome"); NOT for finding files
 - DELETE_FILE        → user wants to delete or remove a local file by name (e.g. "delete X", "刪掉X", "remove X")
+- UNDO_ACTION        → user wants to undo, revert, or reverse the last action (e.g. "undo that", "revert", "cancel what you did", "撤銷", "復原", "取消剛才")
 - EXECUTE_PYTHON     → user wants to analyze, count, calculate, or process data from the active document using Python — write and run actual code (use when user says "用python", "analyze", "calculate", "count", "分析", "計算")
 
 IMPORTANT: Never use OPEN_APP to open a file — use SEARCH_LOCAL_DOCS to find it first, then the user will choose to open it themselves.
@@ -199,7 +201,7 @@ Your job is to decide:
 
 Return ONLY a single valid JSON object:
 {
-  "action": "SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | DELETE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON",
+  "action": "SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | DELETE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON | UNDO_ACTION",
   "needs_screenshot": true,
   "needs_rag": false,
   "reason": "short reason",
@@ -1749,6 +1751,18 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                 return
             else:
                 yield _sse({"step": "heal", "text": "No files found in Downloads, Documents or Desktop."})
+
+        # ── UNDO_ACTION: reverse the last state-mutating action (NL path) ───
+        if action == "UNDO_ACTION":
+            success, message = ledger.undo()
+            yield _sse({
+                "step": "result",
+                "thought": "Reversing the last action.",
+                "action": "DRAFT_CONTENT",
+                "payload": message,
+            })
+            yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
+            return
 
         # ── DELETE_FILE: search dirs, rank candidates, let user pick ─────────
         if action == "DELETE_FILE":
