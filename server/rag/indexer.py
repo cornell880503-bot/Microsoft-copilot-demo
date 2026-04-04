@@ -126,6 +126,32 @@ def _load_file(path: Path) -> list[Document]:
         return _load_text(path)
 
 
+def index_single_file(path: str | Path) -> bool:
+    """
+    Add or update a single file in the vector store without full re-index.
+    Returns True on success.
+    """
+    p = Path(path)
+    if not p.exists() or not p.is_file() or p.suffix.lower() not in SUPPORTED_EXTS:
+        return False
+    try:
+        docs = _load_file(p)
+        if not docs:
+            return False
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500, chunk_overlap=50,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
+        chunks = splitter.split_documents(docs)
+        store = get_vector_store()
+        store.add_documents(chunks)
+        logger.info("RAG: indexed single file %s → %d chunks", p.name, len(chunks))
+        return True
+    except Exception as e:
+        logger.warning("RAG: failed to index %s: %s", p.name, e)
+        return False
+
+
 def index_local_data(extra_dirs: list[str] | None = None) -> dict:
     """
     Scan local_data/ plus any extra_dirs for supported files,

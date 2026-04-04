@@ -214,7 +214,8 @@ Routing principles:
 - When the user asks for a multi-step outcome, pick the action that best represents the final user-facing step and use `plan` to describe the sub-steps.
 - Prefer model-based intent understanding over brittle keyword shortcuts.
 - Set needs_screenshot=true only when the visible screen content is likely necessary to answer correctly.
-- Set needs_rag=true only when local knowledge-base retrieval is likely relevant.
+- Set needs_rag=true when local knowledge-base retrieval is likely relevant.
+  Always set needs_rag=true when: the user references a specific document or file by name (e.g. "re-summarize the Cohere doc", "read the report"), or the query is about content from a previously saved/indexed file.
 - Prefer low-latency routing. Do not request screenshot or RAG unless they are actually useful.
 """
 

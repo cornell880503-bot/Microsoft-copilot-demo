@@ -32,7 +32,7 @@ from memory_store import MemoryStore
 from privacy_mode import load_privacy_mode, save_privacy_mode, VALID_MODES
 from email_sender import send_email
 from window_context import get_active_window_title
-from rag.indexer import index_local_data
+from rag.indexer import index_local_data, index_single_file
 from rag.searcher import search_docs
 from action_ledger import ledger
 import chats as chats_store
@@ -263,6 +263,9 @@ async def save_file(body: SaveFileRequest):
             save_path.write_text(body.content, encoding="utf-8")
         ledger.push(entry)
         logger.info("Saved file: %s", save_path)
+        # Background: add newly saved file to RAG index immediately
+        import threading
+        threading.Thread(target=index_single_file, args=(save_path,), daemon=True).start()
         return {"saved_to": str(save_path), "filename": safe_name}
     except Exception as e:
         logger.exception("Failed to save file")
