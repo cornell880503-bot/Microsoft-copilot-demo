@@ -17,22 +17,30 @@ An AI-powered desktop assistant built with Electron + React + Python, styled aft
 | **Chart & Visualization** | Draws bar charts, pie charts, histograms, scatter plots and saves them to Downloads automatically |
 | **Email with Attachment** | Drafts an email, attaches a generated chart or document summary, and sends it via SMTP |
 | **Meeting Scheduling** | Creates a `.ics` calendar event from natural language (e.g. "next Monday 10am") and opens it in Calendar |
-| **Local RAG** | Indexes PDF, TXT, CSV, Excel, and Word files in Downloads / Documents / Desktop into a vector store and retrieves relevant content via semantic search |
+| **Local RAG** | Indexes PDF, TXT, CSV, Excel, and Word files in Downloads / Documents / Desktop into a vector store; newly saved files are indexed immediately in the background |
+| **Webpage Summarization** | Fetches and summarizes the active browser tab's content on demand — triggered only when the query genuinely needs it |
 | **Image Generation** | Calls Gemini image model with an auto-enhanced prompt and displays the result inline |
 | **Open App / Web Search** | Launches any macOS app by name, or opens a Bing search for anything browser-based |
-| **File Save** | Writes any output — tables, summaries, analysis results — to `~/Downloads/` |
+| **File Save (.docx)** | Writes any output as a real Word document (`.docx`) to `~/Downloads/`, with proper headings and bullet formatting |
+| **File Delete with RAG ranking** | AI ranks local file candidates by relevance; user selects from a list before deletion |
+| **Undo Last Action** | Reverses the last file save, delete, or meeting — with an Undo button on the action card and Cmd+Z shortcut |
 | **Proactive Suggestions** | Background monitor watches the active app and surfaces context-aware quick prompts automatically |
 | **Multi-turn Memory** | Maintains conversation context across messages; persists all chats to disk |
 
 ### Technical Highlights
 
-- **Two-stage routing**: a fast lightweight model first decides the action type, whether a screenshot is needed, and whether RAG is needed — before the heavier execution model runs. This cuts average latency significantly.
-- **Conditional visual context**: screenshots are captured only for intents that genuinely need visual grounding, not on every request.
+- **Two-stage routing**: a fast lightweight model (`gemini-2.5-flash`) first decides the action type, whether a screenshot is needed, and whether RAG is needed — before the heavier execution model runs. This cuts average latency significantly.
+- **Conditional visual context**: screenshots and browser page fetches are triggered only when the fast router determines the task needs visual or web grounding — never on every request.
 - **Real Python execution**: for document analysis the agent generates executable Python code, runs it in a sandboxed subprocess with a 60-second timeout, and streams the actual output back. If the code errors, it auto-repairs and retries once.
 - **Self-healing code**: on execution error, the stderr is fed back to Gemini which rewrites the code and re-runs it automatically.
 - **Document-aware context**: extracts live text from the open document (Excel, Numbers, CSV, Word, PDF) and passes column headers and sample rows to guide code generation — so the AI always analyzes the right column.
+- **Auto-locate files by name**: when the user references a file by name in natural language (including mixed Chinese/English), the agent finds it automatically without needing an explicit search step.
+- **Incremental RAG indexing**: newly saved files are indexed into the vector store immediately in a background thread — no restart required.
+- **Full-stack Undo**: an `ActionLedger` snapshots file state before every write, delete, or calendar action; undo is one click or Cmd+Z.
+- **Real .docx output**: saved documents are written as proper Word files with heading and bullet formatting via `python-docx`, not plain text.
 - **Model fallback**: primary model is `gemini-3-flash-preview`; on 503 overload it falls back to `gemini-2.5-flash` automatically.
 - **Privacy modes**: Safe Mode and Enhanced Mode give users control over how much screen context the agent reads.
+- **Demo / User mode**: reasoning traces and confidence scores are visible in Demo Mode for presentation; hidden in User Mode for a clean consumer experience.
 
 ---
 
@@ -206,10 +214,12 @@ Every time the user sends a message:
 | `DRAFT_CONTENT` | Write, summarize, explain, translate | Returns formatted text response |
 | `GENERATE_IMAGE` | Create or visualize an image | Calls Gemini image model |
 | `SEND_EMAIL` | Send an email | Opens action card with editable fields and optional attachments |
-| `SAVE_FILE` | Save content to disk | Writes output to `~/Downloads/` |
-| `SCHEDULE_MEETING` | Schedule a meeting | Generates `.ics` file and opens system calendar |
+| `SAVE_FILE` | Save content to disk | Writes real `.docx` Word file to `~/Downloads/`; indexes immediately; undoable |
+| `DELETE_FILE` | Delete a local file | AI ranks candidates from RAG; user picks from list; undoable |
+| `SCHEDULE_MEETING` | Schedule a meeting | Generates `.ics` file and opens system calendar; undoable |
 | `OPEN_APP` | Open an application | Launches app or browser search |
 | `SEARCH_LOCAL_DOCS` | Find a file | Scans local directories and ranks relevant files |
+| `UNDO_ACTION` | Undo the last action | Restores file from snapshot or removes created artifact |
 
 ---
 
@@ -217,15 +227,20 @@ Every time the user sends a message:
 
 | Feature | Description |
 |---------|-------------|
-| **Fast Intent Router** | Low-latency routing stage decides action, screenshot need, and RAG need before the heavy execution path runs |
+| **Fast Intent Router** | Low-latency routing stage (`gemini-2.5-flash`) decides action, screenshot need, and RAG need before the heavy execution path runs |
 | **Real Python Code Execution** | Agent writes pandas / matplotlib code, runs it in a subprocess, streams the actual output back |
 | **Self-Healing Code** | On execution error, stderr is fed back to Gemini which rewrites and re-runs the code automatically |
 | **Chart Generation** | Draws bar charts, pie charts, histograms, scatter plots and saves to Downloads |
-| **Conditional Visual Context** | Screenshots captured only when the task needs visual grounding |
+| **Conditional Visual Context** | Screenshots and browser page fetches triggered only when the fast router flags the task as needing them |
+| **Webpage Summarization** | Fetches the active browser tab's full text on demand for summarization or document merging |
 | **Document-Aware Context** | Extracts live text from open Excel, Numbers, CSV, Word, PDF files with column-level hints for accurate analysis |
-| **Multi-format RAG** | Indexes PDF, TXT, CSV, Excel, Word across Downloads / Documents / Desktop |
+| **Auto-locate Files** | Extracts filenames from natural language queries (including mixed Chinese/English) and resolves them automatically |
+| **Multi-format RAG** | Indexes PDF, TXT, CSV, Excel, Word across Downloads / Documents / Desktop; newly saved files indexed immediately |
 | **Numbers Workbook Support** | Reads live Apple Numbers workbooks via CSV export, falls back across sheets/tables |
 | **Deterministic Spreadsheet Analytics** | Fast-path for common metrics and data-shape questions without freeform codegen |
+| **Real .docx File Output** | Saves Word documents with proper heading and bullet formatting via `python-docx` |
+| **File Delete with Candidate Ranking** | RAG ranks the most relevant local files; user selects before deletion |
+| **Full-stack Undo** | ActionLedger snapshots state before every write/delete/meeting; Cmd+Z or button restores |
 | **Proactive Suggestions** | Background monitor surfaces context-aware quick prompts on app open |
 | **Calendar Integration** | Reads macOS Calendar for structured events; screenshot understanding for Lark/Google Calendar |
 | **Image Generation** | Gemini image model with auto-enhanced prompt, result displayed inline |
@@ -233,7 +248,7 @@ Every time the user sends a message:
 | **Schedule Meeting** | Natural language → `.ics` → system calendar |
 | **Multi-turn Memory** | Conversation context persists across messages and sessions |
 | **Conversation Sidebar** | Create, switch, rename, delete conversations with auto-generated titles |
-| **Dual UI Mode** | User Mode and Demo Mode (with visible pipeline logs and latency telemetry) |
+| **Demo / User Mode** | Demo Mode shows reasoning traces and pipeline scores; User Mode presents a clean consumer interface |
 | **Privacy Modes** | Safe Mode and Enhanced Mode give users control over screen context usage |
 | **Model Fallback** | Primary `gemini-3-flash-preview` → fallback `gemini-2.5-flash` on 503 |
 
@@ -274,8 +289,11 @@ Microsoft-copilot-demo/
 ├── electron/                  # Electron main process
 ├── server/                    # FastAPI backend and agent pipeline
 │   ├── agent.py               # Orchestrator: routing, execution, SSE streaming
+│   ├── main.py                # FastAPI app, endpoints, action ledger integration
+│   ├── action_ledger.py       # Undo system: LIFO snapshot/restore stack
 │   ├── data_analytics.py      # Deterministic spreadsheet analytics fast path
-│   ├── window_context.py      # Active app detection and document extraction
+│   ├── window_context.py      # Active app detection, document extraction, browser fetch
+│   ├── prompt_builder.py      # Context-aware prompt assembly
 │   ├── rag/                   # Vector indexer and semantic searcher
 │   ├── memory_store.py        # Conversation persistence
 │   └── start.sh               # Server startup script
