@@ -50,6 +50,15 @@ class PromptBuilder:
         rag_section = self._build_rag_section(rag_results)
         context_section = self._build_context_section(selected_context)
 
+        has_content = bool(doc_text or rag_results)
+        instruction = (
+            "Using the document content and knowledge base results above, "
+            "write the complete response directly — do NOT ask the user to re-summarize, "
+            "do NOT redirect or describe what you will do. Just produce the actual answer now."
+            if has_content else
+            "Respond directly and completely to the user's request."
+        )
+
         augmented_prompt = (
             "You are an AI Copilot embedded in the user's workflow.\n\n"
             f"Active Application:\n{active_window or 'Unknown'}\n\n"
@@ -58,7 +67,7 @@ class PromptBuilder:
             f"{doc_section}"
             f"{rag_section}\n"
             f"User Request:\n{user_input}\n\n"
-            "Generate actionable output."
+            f"{instruction}"
         )
 
         return {
@@ -105,7 +114,7 @@ class PromptBuilder:
         if not rag_results:
             return ""
         excerpts = "\n---\n".join(
-            f"[source: {r['source']}, score: {r['score']:.3f}]\n{r['content']}"
+            f"[source: {r['source']}]\n{r['content']}"
             for r in rag_results
         )
-        return f"\n\nLocal Knowledge Base Results:\n{excerpts}"
+        return f"\n\nRelevant Document Content (use this to answer the user's request):\n{excerpts}"
