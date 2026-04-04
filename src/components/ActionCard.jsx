@@ -37,11 +37,25 @@ const ACTION_META = {
 
 export default function ActionCard({ thought, action, payload, displayMode = 'demo', onConfirm, onCancel }) {
   const meta   = ACTION_META[action] || { icon: '⚡', label: action, color: '#8661C5', fields: [] };
-  const [fields, setFields] = useState(
-    typeof payload === 'object' ? payload : { content: payload }
-  );
+  const [fields, setFields] = useState(() => {
+    let parsed = payload;
+    if (typeof payload === 'string') {
+      try { parsed = JSON.parse(payload); } catch { return { content: payload }; }
+    }
+    if (!parsed || typeof parsed !== 'object') return {};
+    // Recovery: if SAVE_FILE payload has no filename but content is a JSON string with one
+    if (action === 'SAVE_FILE' && !parsed.filename && typeof parsed.content === 'string') {
+      try {
+        const inner = JSON.parse(parsed.content);
+        if (inner && inner.filename) return inner;
+      } catch { /* use as-is */ }
+    }
+    return parsed;
+  });
+  const parsedPayload = (payload && typeof payload === 'object') ? payload :
+    (typeof payload === 'string' ? (() => { try { return JSON.parse(payload); } catch { return {}; } })() : {});
   const [selectedPath, setSelectedPath] = useState(
-    action === 'DELETE_FILE' && payload?.candidates?.length > 0 ? payload.candidates[0].path : null
+    action === 'DELETE_FILE' && parsedPayload?.candidates?.length > 0 ? parsedPayload.candidates[0].path : null
   );
   const [editing, setEditing]     = useState(false);
   const [confirmed, setConfirmed] = useState(false);

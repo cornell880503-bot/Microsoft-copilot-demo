@@ -1523,6 +1523,18 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             except (json.JSONDecodeError, TypeError):
                 action_payload = {"content": result["payload"]}
 
+            # If SAVE_FILE payload parsing failed and filename is missing,
+            # try to recover by re-parsing the content string as JSON
+            if action == "SAVE_FILE" and "filename" not in action_payload:
+                raw_content = action_payload.get("content", "")
+                if isinstance(raw_content, str):
+                    try:
+                        recovered = json.loads(raw_content)
+                        if isinstance(recovered, dict) and "filename" in recovered:
+                            action_payload = recovered
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
             # Force .docx for document saves — model often defaults to .txt
             if action == "SAVE_FILE":
                 fname = action_payload.get("filename", "")
