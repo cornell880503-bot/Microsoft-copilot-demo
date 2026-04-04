@@ -39,7 +39,7 @@ const TYPE_STYLES = {
   heal:    { bar: '#FF8C00', label: 'HEAL'  },
 };
 
-function ThoughtEntry({ thought, onActionConfirm, onActionCancel, onEmailFile, onOpenFile }) {
+function ThoughtEntry({ thought, onActionConfirm, onActionCancel, onEmailFile, onOpenFile, displayMode }) {
   if (thought.type === 'result') return <ResultCard thought={thought} />;
   if (thought.type === 'image') {
     return (
@@ -56,6 +56,7 @@ function ThoughtEntry({ thought, onActionConfirm, onActionCancel, onEmailFile, o
         thought={thought.thought}
         action={thought.action}
         payload={thought.payload}
+        displayMode={displayMode}
         onConfirm={onActionConfirm}
         onCancel={onActionCancel}
       />
@@ -225,6 +226,7 @@ function AssistantMessage({ thought, onActionConfirm, onActionCancel, onEmailFil
             thought={null}
             action={thought.action}
             payload={thought.payload}
+            displayMode="user"
             onConfirm={onActionConfirm}
             onCancel={onActionCancel}
           />
@@ -357,6 +359,7 @@ export default function AgentThoughts({ thoughts, isProcessing, onActionConfirm,
         <ThoughtEntry
           key={t.id}
           thought={t}
+          displayMode={displayMode}
           onActionConfirm={onActionConfirm}
           onActionCancel={onActionCancel}
           onEmailFile={onEmailFile}

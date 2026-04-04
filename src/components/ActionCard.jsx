@@ -35,7 +35,7 @@ const ACTION_META = {
   },
 };
 
-export default function ActionCard({ thought, action, payload, onConfirm, onCancel }) {
+export default function ActionCard({ thought, action, payload, displayMode = 'demo', onConfirm, onCancel }) {
   const meta   = ACTION_META[action] || { icon: '⚡', label: action, color: '#8661C5', fields: [] };
   const [fields, setFields] = useState(
     typeof payload === 'object' ? payload : { content: payload }
@@ -162,8 +162,8 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
         </span>
       </div>
 
-      {/* Thought */}
-      {thought && <div className="action-card-thought">💭 {thought}</div>}
+      {/* Thought — demo mode only */}
+      {thought && displayMode !== 'user' && <div className="action-card-thought">💭 {thought}</div>}
 
       {/* DELETE_FILE: candidate file picker */}
       {action === 'DELETE_FILE' && fields.candidates?.length > 0 && (
@@ -183,7 +183,7 @@ export default function ActionCard({ thought, action, payload, onConfirm, onCanc
                 style={{ marginRight: 8, accentColor: '#D13438' }}
               />
               <span style={{ fontWeight: 500 }}>{c.name}</span>
-              {c.reason && <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>{c.reason.length > 60 ? c.reason.slice(0, 60) + '…' : c.reason}</span>}
+              {c.reason && displayMode !== 'user' && <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>{c.reason.length > 60 ? c.reason.slice(0, 60) + '…' : c.reason}</span>}
             </div>
           ))}
         </div>
