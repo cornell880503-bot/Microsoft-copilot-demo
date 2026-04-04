@@ -1082,20 +1082,22 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
 
         # Strategy 2: keyword matching against local filenames (e.g. "cohere" → Cohere*.docx)
         if not name_candidates:
-            keywords = [w.lower() for w in _re.split(r'[\s,，、。！？\?\!]+', user_input)
+            # Insert spaces at Chinese↔ASCII transitions so "把cohere" → "把 cohere"
+            _spaced = _re.sub(r'([a-zA-Z0-9])([^\x00-\x7F])', r'\1 \2', user_input)
+            _spaced = _re.sub(r'([^\x00-\x7F])([a-zA-Z0-9])', r'\1 \2', _spaced)
+            keywords = [w.lower() for w in _re.split(r'[\s,，、。！？\?\!&]+', _spaced)
                         if len(w) > 2 and w.lower() not in _STOP_WORDS]
             if keywords:
+                seen_paths = set()
                 for d in search_dirs:
                     if not d.exists():
                         continue
                     for f in sorted(d.iterdir(), key=lambda x: -x.stat().st_mtime):
-                        if f.is_file() and f.suffix.lower() in _DOC_EXTS:
+                        if f.is_file() and f.suffix.lower() in _DOC_EXTS and str(f) not in seen_paths:
                             fname_lower = f.name.lower()
                             if any(kw in fname_lower for kw in keywords):
                                 name_candidates.append(f.name)
-                                break
-                    if name_candidates:
-                        break
+                                seen_paths.add(str(f))
 
         if name_candidates:
             for candidate in name_candidates:
