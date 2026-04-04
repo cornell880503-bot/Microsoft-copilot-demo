@@ -1066,6 +1066,45 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     else:
         yield _sse({"step": "context", "text": "No structured document detected in the active app"})
 
+    # ── Auto-locate named file when no active document ──────────────────────
+    # If the user mentions a filename or document in their query but no file is
+    # currently open, scan standard directories and inject the file content.
+    if not doc_path or (doc_path and (doc_path.startswith("http://") or doc_path.startswith("https://"))):
+        import glob as _glob, re as _re
+        # Extract quoted filenames or common document extensions from query
+        name_candidates = _re.findall(r'[「「"\'](.*?)[」」"\']', user_input)
+        # Also catch bare filenames with known extensions
+        name_candidates += _re.findall(r'(\S+\.(?:docx?|xlsx?|csv|pdf|txt|md|pptx?|numbers|pages))', user_input, _re.IGNORECASE)
+        if name_candidates:
+            search_dirs = [
+                Path.home() / "Downloads",
+                Path.home() / "Documents",
+                Path.home() / "Desktop",
+            ]
+            for candidate in name_candidates:
+                candidate = candidate.strip()
+                if not candidate:
+                    continue
+                for d in search_dirs:
+                    # Exact match first, then partial glob
+                    for pattern in [candidate, f"*{candidate}*"]:
+                        for hit in _glob.glob(str(d / "**" / pattern), recursive=True):
+                            hit_path = Path(hit)
+                            if hit_path.is_file():
+                                from window_context import _extract_text_from_file
+                                text = _extract_text_from_file(str(hit_path))
+                                if text:
+                                    doc_text = text
+                                    doc_path = str(hit_path)
+                                    yield _sse({"step": "context", "text": f"Found and read: {hit_path.name} ({len(text)} chars)"})
+                                    break
+                        if doc_path:
+                            break
+                    if doc_path:
+                        break
+                if doc_path:
+                    break
+
     if intent_plan.needs_screenshot:
         yield _sse({"step": "context", "text": "Capturing current app window for visual context..."})
         screen_b64 = capture_screen_base64()
