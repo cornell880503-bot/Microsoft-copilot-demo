@@ -643,6 +643,29 @@ def _fetch_webpage_text(url: str, max_chars: int = 12000) -> Optional[str]:
         return None
 
 
+def get_browser_page_content() -> tuple[Optional[str], Optional[str]]:
+    """
+    Fetch the current browser tab's page content.
+    Only called when the fast router sets needs_screenshot=True
+    (i.e. the user wants to interact with what's on screen).
+    Returns (text, url) or (None, None).
+    """
+    if sys.platform != "darwin":
+        return None, None
+    app = _last_user_app
+    if not app or not any(browser in app for browser in _BROWSER_APPS):
+        return None, None
+    url = _get_browser_url(app)
+    if not url:
+        return None, None
+    logger.info("Browser page fetch triggered (%s): %s", app, url)
+    text = _fetch_webpage_text(url)
+    if text:
+        logger.info("Fetched %d chars from %s", len(text), url)
+        return text, url
+    return None, None
+
+
 def _get_document_path_from_app(app: str) -> Optional[str]:
     script = _APP_DOC_SCRIPTS.get(app)
     if not script:
@@ -697,15 +720,9 @@ def get_active_document_content() -> tuple[Optional[str], Optional[str]]:
         return None, None
     if app == "Numbers":
         return _extract_numbers_table()
-    # Browser: fetch actual web page content via URL
+    # Browser: only fetch page content when the caller explicitly requests it
+    # (controlled by needs_screenshot in the fast router — see agent.py)
     if any(browser in app for browser in _BROWSER_APPS):
-        url = _get_browser_url(app)
-        if url:
-            logger.info("Browser detected (%s), fetching URL: %s", app, url)
-            text = _fetch_webpage_text(url)
-            if text:
-                logger.info("Fetched %d chars from %s", len(text), url)
-                return text, url
         return None, None
     path = _get_document_path_from_app(app)
     if not path:

@@ -35,7 +35,7 @@ from prompt_builder import PromptBuilder
 from query_normalizer import normalize_query
 from rag.searcher import search_docs
 from suggestion_engine import SuggestionEngine
-from window_context import get_active_window_title, capture_screen_base64, get_active_document_content, get_last_capture_mode
+from window_context import get_active_window_title, capture_screen_base64, get_active_document_content, get_browser_page_content, get_last_capture_mode
 
 logger = logging.getLogger(__name__)
 
@@ -1130,6 +1130,13 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             doc_path = None
 
     if intent_plan.needs_screenshot:
+        # Also fetch browser page content here (same intent gate as screenshot)
+        if not doc_text:
+            browser_text, browser_url = get_browser_page_content()
+            if browser_text:
+                doc_text = browser_text
+                doc_path = browser_url
+                yield _sse({"step": "context", "text": f"Read browser page: {len(browser_text)} chars"})
         yield _sse({"step": "context", "text": "Capturing current app window for visual context..."})
         screen_b64 = capture_screen_base64()
         if screen_b64:
