@@ -1067,31 +1067,46 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     else:
         yield _sse({"step": "context", "text": "No structured document detected in the active app"})
 
-    # ── Auto-locate named file when no active document ──────────────────────
-    # If the user mentions a filename or document in their query but no file is
-    # currently open, scan standard directories and inject the file content.
-    if not doc_path or (doc_path and (doc_path.startswith("http://") or doc_path.startswith("https://"))):
+    # ── Auto-locate named file when no active local document ────────────────
+    # Triggers when: no doc_path, OR doc_path is a URL (browser noise)
+    _is_url_doc = doc_path and (doc_path.startswith("http://") or doc_path.startswith("https://"))
+    if not doc_path or _is_url_doc:
         import glob as _glob, re as _re
-        # Extract quoted filenames or common document extensions from query
+        _DOC_EXTS = {".pdf", ".docx", ".doc", ".txt", ".md", ".xlsx", ".xls", ".csv", ".pptx", ".ppt", ".numbers", ".pages"}
+        _STOP_WORDS = {"the", "this", "that", "with", "from", "and", "for", "一個", "文檔", "文件", "重新", "總結", "創建", "一次", "新的", "新"}
+        search_dirs = [Path.home() / "Downloads", Path.home() / "Documents", Path.home() / "Desktop"]
+
+        # Strategy 1: quoted filenames or bare filenames with known extensions
         name_candidates = _re.findall(r'[「「"\'](.*?)[」」"\']', user_input)
-        # Also catch bare filenames with known extensions
         name_candidates += _re.findall(r'(\S+\.(?:docx?|xlsx?|csv|pdf|txt|md|pptx?|numbers|pages))', user_input, _re.IGNORECASE)
+
+        # Strategy 2: keyword matching against local filenames (e.g. "cohere" → Cohere*.docx)
+        if not name_candidates:
+            keywords = [w.lower() for w in _re.split(r'[\s,，、。！？\?\!]+', user_input)
+                        if len(w) > 2 and w.lower() not in _STOP_WORDS]
+            if keywords:
+                for d in search_dirs:
+                    if not d.exists():
+                        continue
+                    for f in sorted(d.iterdir(), key=lambda x: -x.stat().st_mtime):
+                        if f.is_file() and f.suffix.lower() in _DOC_EXTS:
+                            fname_lower = f.name.lower()
+                            if any(kw in fname_lower for kw in keywords):
+                                name_candidates.append(f.name)
+                                break
+                    if name_candidates:
+                        break
+
         if name_candidates:
-            search_dirs = [
-                Path.home() / "Downloads",
-                Path.home() / "Documents",
-                Path.home() / "Desktop",
-            ]
             for candidate in name_candidates:
                 candidate = candidate.strip()
                 if not candidate:
                     continue
                 for d in search_dirs:
-                    # Exact match first, then partial glob
                     for pattern in [candidate, f"*{candidate}*"]:
                         for hit in _glob.glob(str(d / "**" / pattern), recursive=True):
                             hit_path = Path(hit)
-                            if hit_path.is_file():
+                            if hit_path.is_file() and hit_path.suffix.lower() in _DOC_EXTS:
                                 from window_context import _extract_text_from_file
                                 text = _extract_text_from_file(str(hit_path))
                                 if text:
@@ -1099,12 +1114,20 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                                     doc_path = str(hit_path)
                                     yield _sse({"step": "context", "text": f"Found and read: {hit_path.name} ({len(text)} chars)"})
                                     break
-                        if doc_path:
+                        if doc_path and not _is_url_doc:
                             break
-                    if doc_path:
+                    if doc_path and not _is_url_doc:
                         break
-                if doc_path:
+                if doc_path and not _is_url_doc:
                     break
+
+        # If URL doc was replaced by a local file, clear the URL noise
+        if _is_url_doc and doc_path and not (doc_path.startswith("http://") or doc_path.startswith("https://")):
+            pass  # successfully replaced URL with local file
+        elif _is_url_doc and (not doc_path or doc_path.startswith("http")):
+            # Still a URL — suppress it to avoid polluting context with browser noise
+            doc_text = None
+            doc_path = None
 
     if intent_plan.needs_screenshot:
         yield _sse({"step": "context", "text": "Capturing current app window for visual context..."})
