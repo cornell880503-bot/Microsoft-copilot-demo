@@ -47,7 +47,7 @@ function messagesToThoughts(messages) {
     if (c.startsWith('[Generated image:')) {
       return { ...base, type: 'result', thought: null, action: 'GENERATE_IMAGE', payload: c };
     }
-    if (c.startsWith('[Proposed SEND_EMAIL:') || c.startsWith('[Proposed SAVE_FILE:')) {
+    if (/^\[Proposed (SEND_EMAIL|SAVE_FILE|SCHEDULE_MEETING|DELETE_FILE|OPEN_APP):/.test(c)) {
       return { ...base, type: 'result', thought: null, action: 'DRAFT_CONTENT', payload: c };
     }
     return { ...base, type: 'result', thought: null, action: 'DRAFT_CONTENT', payload: c };

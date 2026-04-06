@@ -251,7 +251,7 @@ function AssistantMessage({ thought, onActionConfirm, onActionCancel, onEmailFil
   }
   // result — detect historical action card vs normal text
   const payload = thought.payload || '';
-  const isHistoricalAction = /^\[Proposed (SEND_EMAIL|SAVE_FILE)/.test(payload)
+  const isHistoricalAction = /^\[Proposed (SEND_EMAIL|SAVE_FILE|SCHEDULE_MEETING|DELETE_FILE|OPEN_APP):/.test(payload)
                           || /^\[Generated image:/.test(payload);
   return (
     <div className="um-row um-row-assistant">
