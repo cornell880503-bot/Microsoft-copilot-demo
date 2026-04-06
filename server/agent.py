@@ -1471,9 +1471,15 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", FALLBACK_MODEL)
         logger.info("Sending %d-turn conversation to Gemini", len(contents))
 
-        # For action-card actions decided by the fast router, force the action so the
-        # execution model cannot override it with DRAFT_CONTENT.
         _ACTION_CARD_ACTIONS = {"SEND_EMAIL", "SAVE_FILE", "DELETE_FILE", "SCHEDULE_MEETING", "OPEN_APP", "UNDO_ACTION"}
+
+        # Optimise: DRAFT_CONTENT → ACTION_CARD is wasteful — skip the intermediate step.
+        # Go straight to the action card so the model writes the real content in one shot.
+        if (len(intent_plan.actions) > 1
+                and intent_plan.action == "DRAFT_CONTENT"
+                and intent_plan.actions[1] in _ACTION_CARD_ACTIONS):
+            logger.info("Skipping intermediate DRAFT_CONTENT; jumping to %s directly", intent_plan.actions[1])
+            intent_plan.actions = intent_plan.actions[1:]
         if intent_plan.action == "EXECUTE_PYTHON":
             result = {"thought": "Analyzing document with Python.", "action": "EXECUTE_PYTHON", "payload": "GENERATE_CODE"}
         elif intent_plan.action in _ACTION_CARD_ACTIONS:
