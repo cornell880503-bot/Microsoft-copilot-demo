@@ -1676,12 +1676,57 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
 
             if deterministic and deterministic.handled:
                 yield _sse({"step": "think", "text": "Using deterministic analytics path for this spreadsheet request..."})
+                det_carry_text = f"**{deterministic.title} 分析結果**\n\n{deterministic.body}"
                 yield _sse({
                     "step": "result",
                     "thought": "Used the built-in analytics pipeline for a faster and more stable spreadsheet analysis result.",
                     "action": "DRAFT_CONTENT",
-                    "payload": f"**{deterministic.title} 分析結果**\n\n{deterministic.body}",
+                    "payload": det_carry_text,
                 })
+                # Multi-action continuation
+                det_pending = intent_plan.actions[1:]
+                for next_action in det_pending:
+                    yield _sse({"step": "think", "text": f"Continuing to next step: {next_action}..."})
+                    followup_hint = (
+                        f'\n\nThe analysis produced this result:\n"""\n{det_carry_text[:3000]}\n"""\n\n'
+                        f'IMPORTANT: The next action is "{next_action}". '
+                        f'You MUST set "action": "{next_action}". Use the analysis result above as the primary content.'
+                    )
+                    followup_contents = contents[:-1] + [{
+                        "role": "user",
+                        "parts": [{"text": contents[-1]["parts"][-1]["text"] + followup_hint}],
+                    }]
+                    fu_response, _ = _generate_with_fallback(
+                        client, model_name, fallback_model,
+                        contents=followup_contents,
+                        config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+                    )
+                    try:
+                        fu_result = json.loads(_clean_json(fu_response.text))
+                    except json.JSONDecodeError:
+                        fu_result = {"thought": "", "action": next_action, "payload": {}}
+                    fu_result["action"] = next_action
+                    if next_action in ("SEND_EMAIL", "SAVE_FILE", "SCHEDULE_MEETING", "OPEN_APP"):
+                        try:
+                            fu_payload = json.loads(fu_result["payload"]) if isinstance(fu_result["payload"], str) else fu_result["payload"]
+                        except (json.JSONDecodeError, TypeError):
+                            fu_payload = {}
+                        if next_action == "SEND_EMAIL" and not fu_payload.get("body"):
+                            fu_payload["body"] = det_carry_text
+                        if next_action == "SAVE_FILE":
+                            if not fu_payload.get("content"):
+                                fu_payload["content"] = det_carry_text
+                            fn2 = fu_payload.get("filename", "")
+                            if fn2.lower().endswith(".txt"):
+                                fu_payload["filename"] = fn2[:-4] + ".docx"
+                        yield _sse({
+                            "step": "action_card",
+                            "thought": _public_thought_for_action(next_action),
+                            "action": next_action,
+                            "payload": fu_payload,
+                        })
+                    else:
+                        yield _sse({"step": "result", **fu_result})
                 yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
                 return
 
