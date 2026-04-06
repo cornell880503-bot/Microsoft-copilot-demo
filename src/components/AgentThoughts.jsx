@@ -99,7 +99,11 @@ function ResultCard({ thought }) {
         <span className="result-action-dot" style={{ background: color }} />
         {thought.action}
       </div>
-      <div className="result-payload"><MarkdownText text={thought.payload} /></div>
+      <div className="result-payload">
+        {/^\[Proposed [A-Z_]+:/.test(thought.payload) || /^\[Generated image:/.test(thought.payload)
+          ? <HistoricalActionCard content={thought.payload} />
+          : <MarkdownText text={thought.payload} />}
+      </div>
     </div>
   );
 }
