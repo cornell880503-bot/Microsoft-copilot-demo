@@ -201,17 +201,27 @@ Your job is to decide:
 
 Return ONLY a single valid JSON object:
 {
-  "action": "SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | DELETE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON | UNDO_ACTION",
+  "actions": ["<primary action>", "<optional second action>"],
   "needs_screenshot": true,
   "needs_rag": false,
   "reason": "short reason",
   "plan": "short execution plan"
 }
 
+The "actions" field is an ordered list of actions to execute in sequence.
+Use a single-item list for most requests. Use two items only when the user explicitly asks for two distinct outcomes (e.g. "summarize AND send email", "analyze AND save to file", "run python AND send results by email").
+
+Valid action values: SEARCH_LOCAL_DOCS | DRAFT_CONTENT | GENERATE_IMAGE | SEND_EMAIL | SAVE_FILE | DELETE_FILE | SCHEDULE_MEETING | OPEN_APP | EXECUTE_PYTHON | UNDO_ACTION
+
+Common multi-action patterns:
+- "summarize + send email"  → ["DRAFT_CONTENT", "SEND_EMAIL"]
+- "analyze + send results"  → ["EXECUTE_PYTHON", "SEND_EMAIL"]
+- "summarize + save file"   → ["DRAFT_CONTENT", "SAVE_FILE"]
+- "analyze + save file"     → ["EXECUTE_PYTHON", "SAVE_FILE"]
+
 Routing principles:
 - Use EXECUTE_PYTHON for spreadsheet/file analysis, counting, chart selection, metrics analysis, and structured data work.
 - Use DRAFT_CONTENT for normal writing, explanation, summarization, and interpretation.
-- When the user asks for a multi-step outcome, pick the action that best represents the final user-facing step and use `plan` to describe the sub-steps.
 - Prefer model-based intent understanding over brittle keyword shortcuts.
 - Set needs_screenshot=true only when the visible screen content is likely necessary to answer correctly.
 - Set needs_rag=true when local knowledge-base retrieval is likely relevant.
@@ -222,18 +232,36 @@ Routing principles:
 
 @dataclass
 class IntentPlan:
-    action: str
+    actions: list  # ordered list of actions to execute
     needs_screenshot: bool
     needs_rag: bool
     reason: str
     plan: str
     source: str
 
+    @property
+    def action(self) -> str:
+        """Primary (first) action — preserved for backward compatibility."""
+        return self.actions[0] if self.actions else "DRAFT_CONTENT"
+
+
+_VALID_ACTIONS = {
+    "SEARCH_LOCAL_DOCS", "DRAFT_CONTENT", "GENERATE_IMAGE", "SEND_EMAIL",
+    "SAVE_FILE", "DELETE_FILE", "SCHEDULE_MEETING", "OPEN_APP",
+    "EXECUTE_PYTHON", "UNDO_ACTION",
+}
+
 
 def _coerce_intent_plan(payload: dict, source: str) -> IntentPlan:
-    action = str(payload.get("action", "DRAFT_CONTENT")).strip() or "DRAFT_CONTENT"
+    # Support both new "actions" array and legacy "action" string
+    raw_actions = payload.get("actions") or [payload.get("action", "DRAFT_CONTENT")]
+    if isinstance(raw_actions, str):
+        raw_actions = [raw_actions]
+    actions = [str(a).strip() for a in raw_actions if str(a).strip() in _VALID_ACTIONS]
+    if not actions:
+        actions = ["DRAFT_CONTENT"]
     return IntentPlan(
-        action=action,
+        actions=actions,
         needs_screenshot=bool(payload.get("needs_screenshot")),
         needs_rag=bool(payload.get("needs_rag")),
         reason=str(payload.get("reason", "")).strip() or "No reason provided.",
@@ -1037,7 +1065,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     except Exception as exc:
         logger.warning("Fast intent router failed: %s", exc)
         intent_plan = IntentPlan(
-            action="DRAFT_CONTENT",
+            actions=["DRAFT_CONTENT"],
             needs_screenshot=False,
             needs_rag=False,
             reason="Router failed, so falling back to the default path.",
@@ -1047,7 +1075,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
     yield _sse({
         "step": "decision",
         "text": (
-            f"Fast router: action={intent_plan.action}, "
+            f"Fast router: actions={intent_plan.actions}, "
             f"screenshot={'yes' if intent_plan.needs_screenshot else 'no'}, "
             f"rag={'yes' if intent_plan.needs_rag else 'no'}, "
             f"source={intent_plan.source}"
@@ -1788,12 +1816,59 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
 
                 output = stdout or (f"⚠️ Error:\n{stderr}" if stderr else "(No output produced)")
                 fname = Path(doc_path).name
+                py_carry_text = f"**{fname} 分析結果**\n\n{output}"
                 yield _sse({
                     "step": "result",
                     "thought": result["thought"],
                     "action": "DRAFT_CONTENT",
-                    "payload": f"**{fname} 分析結果**\n\n{output}",
+                    "payload": py_carry_text,
                 })
+
+                # Multi-action: if next action is SEND_EMAIL or SAVE_FILE, continue
+                py_pending = intent_plan.actions[1:]
+                for next_action in py_pending:
+                    yield _sse({"step": "think", "text": f"Continuing to next step: {next_action}..."})
+                    followup_hint = (
+                        f'\n\nThe Python analysis produced this result:\n"""\n{py_carry_text[:3000]}\n"""\n\n'
+                        f'IMPORTANT: The next action is "{next_action}". '
+                        f'You MUST set "action": "{next_action}". Use the analysis result above as the primary content.'
+                    )
+                    followup_contents = contents[:-1] + [{
+                        "role": "user",
+                        "parts": [{"text": contents[-1]["parts"][-1]["text"] + followup_hint}],
+                    }]
+                    fu_response, _ = _generate_with_fallback(
+                        client, model_name, fallback_model,
+                        contents=followup_contents,
+                        config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+                    )
+                    try:
+                        fu_result = json.loads(_clean_json(fu_response.text))
+                    except json.JSONDecodeError:
+                        fu_result = {"thought": "", "action": next_action, "payload": {}}
+                    fu_result["action"] = next_action
+                    if next_action in ("SEND_EMAIL", "SAVE_FILE", "SCHEDULE_MEETING", "OPEN_APP"):
+                        try:
+                            fu_payload = json.loads(fu_result["payload"]) if isinstance(fu_result["payload"], str) else fu_result["payload"]
+                        except (json.JSONDecodeError, TypeError):
+                            fu_payload = {}
+                        if next_action == "SEND_EMAIL" and not fu_payload.get("body"):
+                            fu_payload["body"] = py_carry_text
+                        if next_action == "SAVE_FILE":
+                            if not fu_payload.get("content"):
+                                fu_payload["content"] = py_carry_text
+                            fname2 = fu_payload.get("filename", "")
+                            if fname2.lower().endswith(".txt"):
+                                fu_payload["filename"] = fname2[:-4] + ".docx"
+                        yield _sse({
+                            "step": "action_card",
+                            "thought": _public_thought_for_action(next_action),
+                            "action": next_action,
+                            "payload": fu_payload,
+                        })
+                    else:
+                        yield _sse({"step": "result", **fu_result})
+
                 yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
             except Exception as exec_err:
                 logger.error("EXECUTE_PYTHON failed: %s", exec_err)
@@ -1948,7 +2023,60 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
             return
 
+        carry_text = str(result.get("payload", ""))
         yield _sse({"step": "result", **result})
+
+        # ── Multi-action continuation ──────────────────────────────────────
+        pending = intent_plan.actions[1:]
+        for next_action in pending:
+            yield _sse({"step": "think", "text": f"Continuing to next step: {next_action}..."})
+            followup_hint = (
+                f'\n\nThe previous step produced this result:\n"""\n{carry_text[:3000]}\n"""\n\n'
+                f'IMPORTANT: The fast router has decided the next action is "{next_action}". '
+                f'You MUST set "action": "{next_action}" in your response. '
+                f'Use the result above as the primary content (e.g. email body or file content). '
+                f'Do not change the action.'
+            )
+            followup_contents = contents[:-1] + [{
+                "role": "user",
+                "parts": [{"text": contents[-1]["parts"][-1]["text"] + followup_hint}],
+            }]
+            fu_response, fu_model = _generate_with_fallback(
+                client, model_name, fallback_model,
+                contents=followup_contents,
+                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+            )
+            fu_raw = _clean_json(fu_response.text)
+            try:
+                fu_result = json.loads(fu_raw)
+            except json.JSONDecodeError:
+                fu_result = {"thought": "", "action": next_action, "payload": {}}
+            fu_result["action"] = next_action  # hard-enforce
+
+            fu_action = next_action
+            if fu_action in ("SEND_EMAIL", "SAVE_FILE", "SCHEDULE_MEETING", "OPEN_APP"):
+                try:
+                    fu_payload = json.loads(fu_result["payload"]) if isinstance(fu_result["payload"], str) else fu_result["payload"]
+                except (json.JSONDecodeError, TypeError):
+                    fu_payload = {"content": fu_result.get("payload", carry_text)}
+                if fu_action == "SAVE_FILE":
+                    fname = fu_payload.get("filename", "")
+                    if fname.lower().endswith(".txt"):
+                        fu_payload["filename"] = fname[:-4] + ".docx"
+                    if not fu_payload.get("content"):
+                        fu_payload["content"] = carry_text
+                if fu_action == "SEND_EMAIL" and not fu_payload.get("body"):
+                    fu_payload["body"] = carry_text
+                yield _sse({
+                    "step": "action_card",
+                    "thought": _public_thought_for_action(fu_action),
+                    "action": fu_action,
+                    "payload": fu_payload,
+                })
+            else:
+                carry_text = str(fu_result.get("payload", ""))
+                yield _sse({"step": "result", **fu_result})
+
         yield _sse({"step": "timing", "text": _elapsed_text(start_time)})
 
     except json.JSONDecodeError:
