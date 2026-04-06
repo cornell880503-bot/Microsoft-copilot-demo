@@ -890,7 +890,7 @@ def _elapsed_text(start_time: float) -> str:
 
 
 def _clean_json(raw: str) -> str:
-    raw = raw.strip()
+    raw = (raw or "").strip()
     # Strip markdown code fences
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
     raw = re.sub(r"\s*```$", "", raw)
@@ -971,7 +971,7 @@ async def generate_chat_title(user_query: str) -> str:
                 f"Reply with ONLY the title, no punctuation, no quotes:\n\n{user_query[:300]}"
             ),
         )
-        return resp.text.strip()[:60] or user_query[:48]
+        return (resp.text or "").strip()[:60] or user_query[:48]
     except Exception:
         return user_query[:48]
 
@@ -997,7 +997,7 @@ async def _generate_image(
             original_prompt=original_prompt,
         ),
     )
-    augmented = aug_response.text.strip()
+    augmented = (aug_response.text or "").strip()
     if used_aug_model != model_name:
         logger.warning("Image prompt augmentation fallback: %s -> %s", model_name, used_aug_model)
     logger.info("Augmented image prompt: %s", augmented[:120])
@@ -1509,7 +1509,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
             try:
                 result = json.loads(raw)
             except json.JSONDecodeError:
-                raw_text = response.text
+                raw_text = response.text or ""
                 # Fast path: if model clearly decided EXECUTE_PYTHON but embedded code in JSON,
                 # skip the JSON battle and jump straight to code-generation step
                 if '"action": "EXECUTE_PYTHON"' in raw_text or "'action': 'EXECUTE_PYTHON'" in raw_text:
@@ -1774,7 +1774,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                     "- Output ONLY executable Python code, no markdown, no explanation"
                 ),
             )
-            code = code_resp.text.strip()
+            code = code_(resp.text or "").strip()
             code = re.sub(r"^```python\s*", "", code)
             code = re.sub(r"\s*```$", "", code).strip()
 
@@ -1792,7 +1792,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                         "Return ONLY executable Python code."
                     ),
                 )
-                code = regen_resp.text.strip()
+                code = regen_(resp.text or "").strip()
                 code = re.sub(r"^```python\s*", "", code)
                 code = re.sub(r"\s*```$", "", code).strip()
 
@@ -1830,7 +1830,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                             "Return ONLY executable Python code, no markdown, no explanation."
                         ),
                     )
-                    fixed = fix_resp.text.strip()
+                    fixed = fix_(resp.text or "").strip()
                     fixed = re.sub(r"^```python\s*", "", fixed)
                     fixed = re.sub(r"\s*```$", "", fixed).strip()
                     stdout, returncode, stderr = _run_code(fixed)
@@ -1853,7 +1853,7 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
                             "Return ONLY executable Python code."
                         ),
                     )
-                    regenerated = regen_output_resp.text.strip()
+                    regenerated = regen_output_(resp.text or "").strip()
                     regenerated = re.sub(r"^```python\s*", "", regenerated)
                     regenerated = re.sub(r"\s*```$", "", regenerated).strip()
                     stdout, returncode, stderr = _run_code(regenerated)
