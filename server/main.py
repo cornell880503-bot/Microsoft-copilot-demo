@@ -497,3 +497,10 @@ async def rename_chat(chat_id: str, body: RenameChatRequest):
 async def delete_chat(chat_id: str):
     chats_store.delete_chat(chat_id)
     return {"ok": True}
+
+@app.patch("/chats/{chat_id}/last-pipeline")
+async def update_last_pipeline(chat_id: str, body: dict):
+    """Attach pipeline thought log to the last assistant message for demo mode persistence."""
+    pipeline = body.get("pipeline", [])
+    chats_store.set_last_pipeline(chat_id, pipeline)
+    return {"ok": True}

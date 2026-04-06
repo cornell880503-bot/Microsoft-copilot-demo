@@ -35,22 +35,27 @@ function formatDate(iso) {
 }
 
 /** Convert stored messages → thought entries for display */
+const PIPELINE_TYPES = new Set(['context', 'search', 'think', 'info', 'process', 'heal', 'decision']);
+
 function messagesToThoughts(messages) {
   let id = 1000;
-  return messages.map((m) => {
-    const base = { id: id++ };
+  return messages.flatMap((m) => {
     if (m.role === 'user') {
-      return { ...base, type: 'user', text: `> ${m.content}` };
+      return [{ id: id++, type: 'user', text: `> ${m.content}` }];
     }
-    // Assistant: detect special prefixes
+    // Restore pipeline thoughts (demo mode only — filtered by USER_MODE_VISIBLE)
+    const pipeline = (m.pipeline || []).map(t => ({ id: id++, type: t.type, text: t.text }));
+    // Final result/action thought
     const c = m.content;
+    let finalThought;
     if (c.startsWith('[Generated image:')) {
-      return { ...base, type: 'result', thought: null, action: 'GENERATE_IMAGE', payload: c };
+      finalThought = { id: id++, type: 'result', thought: null, action: 'GENERATE_IMAGE', payload: c };
+    } else if (/^\[Proposed [A-Z_]+:/.test(c)) {
+      finalThought = { id: id++, type: 'result', thought: null, action: 'DRAFT_CONTENT', payload: c };
+    } else {
+      finalThought = { id: id++, type: 'result', thought: null, action: 'DRAFT_CONTENT', payload: c };
     }
-    if (/^\[Proposed (SEND_EMAIL|SAVE_FILE|SCHEDULE_MEETING|DELETE_FILE|OPEN_APP):/.test(c)) {
-      return { ...base, type: 'result', thought: null, action: 'DRAFT_CONTENT', payload: c };
-    }
-    return { ...base, type: 'result', thought: null, action: 'DRAFT_CONTENT', payload: c };
+    return [...pipeline, finalThought];
   });
 }
 
@@ -196,8 +201,13 @@ export default function CommandPalette() {
   const [suggestions, setSuggestions]     = useState([]);
   const [suggestWindow, setSuggestWindow] = useState('');
 
+  const turnPipelineRef = React.useRef([]);
+
   const addThought = useCallback((t) => {
     setThoughts((prev) => [...prev, { id: nextId(), ...t }]);
+    if (PIPELINE_TYPES.has(t.type)) {
+      turnPipelineRef.current.push({ type: t.type, text: t.text || '' });
+    }
   }, []);
 
   // ── Global Cmd+Z / Ctrl+Z undo shortcut ─────────────────────
@@ -331,6 +341,7 @@ export default function CommandPalette() {
     addThought({ type: 'user', text: `> ${value}` });
     setQuery('');
     setIsProcessing(true);
+    turnPipelineRef.current = [];
 
     let assistantSummary = '';
 
@@ -398,13 +409,21 @@ export default function CommandPalette() {
     } finally {
       setIsProcessing(false);
       if (assistantSummary) {
+        const pipeline = turnPipelineRef.current.slice();
         const newHistory = [
           ...history,
           { role: 'user',      content: value },
-          { role: 'assistant', content: assistantSummary },
+          { role: 'assistant', content: assistantSummary, pipeline },
         ].slice(-20);
         setHistory(newHistory);
-        // Refresh sidebar to show updated title
+        // Persist pipeline to backend so demo mode logs survive reload
+        if (activeChatId && pipeline.length > 0) {
+          fetch(`${SIDECAR}/chats/${activeChatId}/last-pipeline`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pipeline }),
+          }).catch(() => {});
+        }
         refreshChatList();
       }
     }
