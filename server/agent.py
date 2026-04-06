@@ -1439,8 +1439,36 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
 
         fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", FALLBACK_MODEL)
         logger.info("Sending %d-turn conversation to Gemini", len(contents))
+
+        # For action-card actions decided by the fast router, force the action so the
+        # execution model cannot override it with DRAFT_CONTENT.
+        _ACTION_CARD_ACTIONS = {"SEND_EMAIL", "SAVE_FILE", "DELETE_FILE", "SCHEDULE_MEETING", "OPEN_APP", "UNDO_ACTION"}
         if intent_plan.action == "EXECUTE_PYTHON":
             result = {"thought": "Analyzing document with Python.", "action": "EXECUTE_PYTHON", "payload": "GENERATE_CODE"}
+        elif intent_plan.action in _ACTION_CARD_ACTIONS:
+            # Inject router decision as a constraint so the model fills payload correctly
+            # but cannot silently downgrade to DRAFT_CONTENT.
+            action_hint = (
+                f'\n\nIMPORTANT: The fast router has already decided the action is "{intent_plan.action}". '
+                f'You MUST set "action": "{intent_plan.action}" in your response. Do not change it to DRAFT_CONTENT.'
+            )
+            contents[-1]["parts"][-1]["text"] += action_hint
+            response, used_model = _generate_with_fallback(
+                client, model_name, fallback_model,
+                contents=contents,
+                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+            )
+            if used_model != model_name:
+                yield _sse({"step": "heal", "text": f"{model_name} overloaded — switched to {used_model}"})
+            raw = _clean_json(response.text)
+            try:
+                result = json.loads(raw)
+            except json.JSONDecodeError:
+                result = {"thought": "", "action": intent_plan.action, "payload": {}}
+            # Hard-enforce the router's action even if model disobeyed
+            if result.get("action") != intent_plan.action:
+                logger.warning("Execution model overrode router action %s → %s; reverting", intent_plan.action, result.get("action"))
+                result["action"] = intent_plan.action
         else:
             response, used_model = _generate_with_fallback(
                 client, model_name, fallback_model,
