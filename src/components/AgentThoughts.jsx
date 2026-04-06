@@ -144,48 +144,48 @@ function MarkdownText({ text }) {
 }
 
 /* ── Historical action card (loaded from disk) ───────────────────────────────── */
-const ACTION_ICONS = { SEND_EMAIL: '📧', SAVE_FILE: '💾', GENERATE_IMAGE: '🖼' };
+const ACTION_META_HIST = {
+  SEND_EMAIL:       { icon: '📧', color: '#0F6CBD', bg: 'rgba(15,108,189,0.06)', label: (p) => `Sent to ${p.to || '?'} — "${p.subject || ''}"` },
+  SAVE_FILE:        { icon: '💾', color: '#107C10', bg: 'rgba(16,124,16,0.06)',  label: (p) => `Saved ${p.filename || 'file'}` },
+  SCHEDULE_MEETING: { icon: '📅', color: '#8661C5', bg: 'rgba(134,97,197,0.07)', label: (p) => `Meeting: ${p.title || '?'} on ${p.date || '?'} at ${p.time || '?'}` },
+  DELETE_FILE:      { icon: '🗑️', color: '#D13438', bg: 'rgba(209,52,56,0.06)',  label: (p) => `Deleted ${p.filename || p.path || 'file'}` },
+  OPEN_APP:         { icon: '🚀', color: '#F7630C', bg: 'rgba(247,99,12,0.06)',  label: (p) => `Opened ${p.app || '?'}` },
+  GENERATE_IMAGE:   { icon: '🖼',  color: '#8661C5', bg: 'rgba(134,97,197,0.07)', label: ()  => 'Image generated' },
+};
 
 function HistoricalActionCard({ content }) {
-  // Parse [Proposed SEND_EMAIL: {...}] or [Generated image: "..."]
-  const match = content.match(/^\[Proposed (SEND_EMAIL|SAVE_FILE): (\{[\s\S]*\})\]$/);
+  // [Generated image: "..."]
+  if (content.startsWith('[Generated image:')) {
+    const m = ACTION_META_HIST.GENERATE_IMAGE;
+    return (
+      <div style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 11px',
+        background: m.bg, border:`1px solid ${m.color}33`, borderRadius:8, fontSize:12, color: m.color }}>
+        <span>{m.icon}</span><span style={{ fontWeight:600 }}>{m.label({})}</span>
+      </div>
+    );
+  }
+
+  // [Proposed ACTION_NAME: {...}]
+  const match = content.match(/^\[Proposed ([A-Z_]+): ([\s\S]*)\]$/);
   if (match) {
     const action = match[1];
     let payload = {};
-    try { payload = JSON.parse(match[2]); } catch { /* show raw */ }
-    const icon = ACTION_ICONS[action] || '⚡';
-    const label = action === 'SEND_EMAIL'
-      ? `Sent to ${payload.to || '?'} — "${payload.subject || ''}"`
-      : `Saved ${payload.filename || 'file'}`;
+    try {
+      // The JSON payload may itself contain ] so we find the outermost { ... }
+      const jsonStr = match[2].trim();
+      payload = JSON.parse(jsonStr);
+    } catch { /* use empty payload */ }
+
+    const m = ACTION_META_HIST[action] || { icon: '⚡', color: '#8661C5', bg: 'rgba(134,97,197,0.07)', label: () => action };
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 7,
-        padding: '7px 11px',
-        background: 'rgba(16,124,16,0.06)',
-        border: '1px solid rgba(16,124,16,0.2)',
-        borderRadius: 8, fontSize: 12, color: '#107C10',
-      }}>
-        <span>{icon}</span>
-        <span style={{ fontWeight: 600 }}>{label}</span>
+      <div style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 11px',
+        background: m.bg, border:`1px solid ${m.color}33`, borderRadius:8, fontSize:12, color: m.color }}>
+        <span>{m.icon}</span><span style={{ fontWeight:600 }}>{m.label(payload)}</span>
       </div>
     );
   }
-  // Image history entry
-  if (content.startsWith('[Generated image:')) {
-    return (
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 7,
-        padding: '7px 11px',
-        background: 'rgba(134,97,197,0.07)',
-        border: '1px solid rgba(134,97,197,0.2)',
-        borderRadius: 8, fontSize: 12, color: '#8661C5',
-      }}>
-        <span>🖼</span>
-        <span style={{ fontWeight: 600 }}>Image generated</span>
-      </div>
-    );
-  }
-  // Fallback — just render as markdown text
+
+  // Fallback
   return <MarkdownText text={content} />;
 }
 
