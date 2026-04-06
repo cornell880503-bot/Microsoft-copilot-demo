@@ -1178,6 +1178,9 @@ async def run_agent_stream(user_input: str, history: list[dict] | None = None) -
         yield _sse({"step": "context", "text": "Skipping screenshot capture for this intent"})
 
     # ── Step 2: Local RAG Search ───────────────────────────────────────────
+    # Always run RAG for SEARCH_LOCAL_DOCS — the filesystem scan alone isn't enough
+    if intent_plan.action == "SEARCH_LOCAL_DOCS":
+        intent_plan.needs_rag = True
     rag_results = []
     if intent_plan.needs_rag:
         yield _sse({"step": "search", "text": "Searching local knowledge base..."})
