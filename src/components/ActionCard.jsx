@@ -6,37 +6,37 @@ const ACTION_META = {
   SEND_EMAIL: {
     icon: '📧',
     label: 'Send Email',
-    color: '#0F6CBD',
+    color: '#4285F4',
     fields: ['to', 'subject', 'body'],
   },
   SAVE_FILE: {
     icon: '💾',
     label: 'Save File',
-    color: '#107C10',
+    color: '#34A853',
     fields: ['filename', 'content'],
   },
   DELETE_FILE: {
     icon: '🗑️',
     label: 'Delete File',
-    color: '#D13438',
+    color: '#EA4335',
     fields: [],
   },
   SCHEDULE_MEETING: {
     icon: '📅',
     label: 'Schedule Meeting',
-    color: '#8661C5',
+    color: '#1A73E8',
     fields: ['title', 'attendees', 'date', 'time', 'duration_minutes', 'location'],
   },
   OPEN_APP: {
     icon: '🚀',
     label: 'Open App',
-    color: '#F7630C',
+    color: '#FBBC04',
     fields: ['app', 'action'],
   },
 };
 
 export default function ActionCard({ thought, action, payload, displayMode = 'demo', onConfirm, onCancel }) {
-  const meta   = ACTION_META[action] || { icon: '⚡', label: action, color: '#8661C5', fields: [] };
+  const meta   = ACTION_META[action] || { icon: '⚡', label: action, color: '#1A73E8', fields: [] };
   const [fields, setFields] = useState(() => {
     let parsed = payload;
     if (typeof payload === 'string') {
@@ -184,7 +184,7 @@ export default function ActionCard({ thought, action, payload, displayMode = 'de
   if (confirmed) {
     if (undone) {
       return (
-        <div className="action-card action-card-confirmed" style={{ '--action-color': '#8661C5' }}>
+        <div className="action-card action-card-confirmed" style={{ '--action-color': '#1A73E8' }}>
           <span className="action-confirmed-icon">↩</span>
           <span>{undoMsg}</span>
         </div>
@@ -243,7 +243,7 @@ export default function ActionCard({ thought, action, payload, displayMode = 'de
                 name="delete-candidate"
                 checked={selectedPath === c.path}
                 onChange={() => setSelectedPath(c.path)}
-                style={{ marginRight: 8, accentColor: '#D13438' }}
+                style={{ marginRight: 8, accentColor: '#EA4335' }}
               />
               <span style={{ fontWeight: 500 }}>{c.name}</span>
               {c.reason && displayMode !== 'user' && <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>{c.reason.length > 60 ? c.reason.slice(0, 60) + '…' : c.reason}</span>}
@@ -275,7 +275,7 @@ export default function ActionCard({ thought, action, payload, displayMode = 'de
 
       {/* Error */}
       {error && (
-        <div style={{ fontSize: 11, color: '#D13438', background: 'rgba(209,52,56,0.07)', borderRadius: 6, padding: '6px 10px' }}>
+        <div style={{ fontSize: 11, color: '#EA4335', background: 'rgba(234,67,53,0.07)', borderRadius: 6, padding: '6px 10px' }}>
           ⚠ {error}
         </div>
       )}

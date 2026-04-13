@@ -1,27 +1,29 @@
-# Project Copilot: Reimagined for Product Strategy and Demo Execution
+# Sierra Command Center
 
-An AI-powered desktop assistant built with Electron + React + Python, styled after Microsoft Copilot. This repository combines two layers:
+An AI-powered desktop assistant built with Electron + React + Python, styled after Google's design language and powered by Gemini. This repository combines two layers:
 
-- a working prototype that demonstrates agentic desktop assistance
-- a PM-ready product strategy narrative for how Copilot evolves from reactive chat into a proactive AI system
+- a working prototype that demonstrates agentic desktop assistance for Google Workspace users
+- a PM-ready product strategy narrative for how AI assistants evolve from reactive chat into proactive, action-executing systems
+
+Built as a product demo for Google PM application. The entire prototype was designed and built using vibe coding — no prior React or Electron experience.
 
 ---
 
-## What This Copilot Can Do
+## What Sierra Can Do
 
 ### Core Capabilities
 
 | Capability | What it does |
 |---|---|
-| **Python Document Analysis** | Reads your open Excel / CSV / Word / PDF file and runs real pandas / matplotlib code against it — not a description, actual numbers and charts |
+| **Document Analysis** | Reads your open Excel / CSV / Word / PDF file and runs real pandas / matplotlib code against it — actual numbers and charts, not descriptions |
 | **Chart & Visualization** | Draws bar charts, pie charts, histograms, scatter plots and saves them to Downloads automatically |
-| **Email with Attachment** | Drafts an email, attaches a generated chart or document summary, and sends it via SMTP |
+| **Email with Attachment** | Drafts an email, attaches a generated chart or document summary, and sends it via SMTP (Gmail-compatible) |
 | **Meeting Scheduling** | Creates a `.ics` calendar event from natural language (e.g. "next Monday 10am") and opens it in Calendar |
 | **Local RAG** | Indexes PDF, TXT, CSV, Excel, and Word files in Downloads / Documents / Desktop into a vector store; newly saved files are indexed immediately in the background |
-| **Webpage Summarization** | Fetches and summarizes the active browser tab's content on demand — triggered only when the query genuinely needs it |
+| **Webpage Summarization** | Fetches and summarizes the active browser tab's content on demand |
 | **Image Generation** | Calls Gemini image model with an auto-enhanced prompt and displays the result inline |
-| **Open App / Web Search** | Launches any macOS app by name, or opens a Bing search for anything browser-based |
-| **File Save (.docx)** | Writes any output as a real Word document (`.docx`) to `~/Downloads/`, with proper headings and bullet formatting |
+| **Open App / Web Search** | Launches any macOS app by name, or opens a browser search for anything |
+| **File Save (.docx)** | Writes any output as a real Word document to `~/Downloads/`, with proper headings and bullet formatting |
 | **File Delete with RAG ranking** | AI ranks local file candidates by relevance; user selects from a list before deletion |
 | **Undo Last Action** | Reverses the last file save, delete, or meeting — with an Undo button on the action card and Cmd+Z shortcut |
 | **Proactive Suggestions** | Background monitor watches the active app and surfaces context-aware quick prompts automatically |
@@ -29,76 +31,74 @@ An AI-powered desktop assistant built with Electron + React + Python, styled aft
 
 ### Technical Highlights
 
-- **Two-stage routing**: a fast lightweight model (`gemini-2.5-flash`) first decides the action type, whether a screenshot is needed, and whether RAG is needed — before the heavier execution model runs. This cuts average latency significantly.
-- **Conditional visual context**: screenshots and browser page fetches are triggered only when the fast router determines the task needs visual or web grounding — never on every request.
+- **Two-stage Gemini routing**: a fast lightweight model (`gemini-2.5-flash`) first decides the action type and whether screenshot / RAG grounding is needed — before the execution model runs. Cuts average latency significantly.
+- **Multi-action orchestration**: the fast router can identify multiple required actions in sequence (e.g., draft content → save file → send email); the execution model chains them automatically with carry-forward context.
+- **Conditional visual context**: screenshots and browser page fetches are triggered only when the fast router determines the task needs them — never on every request.
 - **Real Python execution**: for document analysis the agent generates executable Python code, runs it in a sandboxed subprocess with a 60-second timeout, and streams the actual output back. If the code errors, it auto-repairs and retries once.
 - **Self-healing code**: on execution error, the stderr is fed back to Gemini which rewrites the code and re-runs it automatically.
-- **Document-aware context**: extracts live text from the open document (Excel, Numbers, CSV, Word, PDF) and passes column headers and sample rows to guide code generation — so the AI always analyzes the right column.
-- **Auto-locate files by name**: when the user references a file by name in natural language (including mixed Chinese/English), the agent finds it automatically without needing an explicit search step.
+- **Document-aware context**: extracts live text from the open document (Excel, Numbers, CSV, Word, PDF) and passes column headers and sample rows to guide code generation.
+- **Auto-locate files by name**: when the user references a file by name in natural language (including mixed Chinese/English), the agent finds it automatically.
 - **Incremental RAG indexing**: newly saved files are indexed into the vector store immediately in a background thread — no restart required.
 - **Full-stack Undo**: an `ActionLedger` snapshots file state before every write, delete, or calendar action; undo is one click or Cmd+Z.
-- **Real .docx output**: saved documents are written as proper Word files with heading and bullet formatting via `python-docx`, not plain text.
+- **Real .docx output**: saved documents are written as proper Word files with heading and bullet formatting via `python-docx`.
 - **Model fallback**: primary model is `gemini-3-flash-preview`; on 503 overload it falls back to `gemini-2.5-flash` automatically.
-- **Privacy modes**: Safe Mode and Enhanced Mode give users control over how much screen context the agent reads.
-- **Demo / User mode**: reasoning traces and confidence scores are visible in Demo Mode for presentation; hidden in User Mode for a clean consumer experience.
+- **Demo / User mode**: reasoning traces and pipeline logs are visible in Demo Mode for presentation; hidden in User Mode for a clean consumer experience.
 
 ---
 
 ## Product Framing
 
-This project explores the next evolution of AI assistants beyond chat-based interaction, inspired by the vision of Microsoft Copilot.
+This project explores the next evolution of AI assistants beyond chat-based interaction, using Google's Gemini models as the intelligence layer.
 
-Instead of a reactive chatbot, this demo proposes a proactive, context-aware Copilot that:
+Instead of a reactive chatbot, Sierra proposes a proactive, context-aware assistant that:
 
-- understands user workflows across applications
-- anticipates user needs
-- executes multi-step tasks autonomously
+- understands user workflows across Google Workspace and native desktop apps
+- anticipates user needs based on what's currently open
+- executes multi-step tasks autonomously — draft, save, send, schedule — in one command
 
 ### Product Vision
 
-Copilot should evolve from a tool you ask into a system that works alongside you.
+AI assistants should evolve from tools you ask into systems that work alongside you.
 
-We believe the next generation of AI assistants will:
+The next generation will:
 
-- reduce context switching across apps
-- persist memory across sessions
-- act, not just respond
+- reduce context switching across Gmail, Drive, Docs, Calendar, and Sheets
+- persist memory across sessions so users never repeat themselves
+- act, not just respond — completing full workflows end-to-end
 
 ### Target Users
 
-Primary segment: knowledge workers using Windows and web tools daily.
+Primary segment: knowledge workers in Google Workspace environments (G Suite enterprises, SMBs, and power users).
 
 Key pain points:
 
-- constant context switching across browser, docs, and chat
-- repetitive workflows that AI should handle
+- constant context switching between Drive, Gmail, Calendar, and Sheets
+- repetitive workflows that AI should handle end-to-end
 - lack of persistent AI memory across sessions
 
 ### Product Thesis
 
-- proactive beats reactive
-- context is the moat
-- memory drives stickiness
+- **Proactive beats reactive** — the most valuable AI moments are when it acts before being asked
+- **Context is the moat** — an assistant that knows your files, calendar, and emails delivers irreplaceable value
+- **Workspace integration unlocks reach** — Gmail, Drive, Calendar, and Meet are the distribution layer; Sierra lives inside them
 
-Copilot should surface suggestions without prompting, use OS-level and app-level context to unlock a better user experience, and build long-term personalization that improves retention.
+### Why This Matters for Google
+
+- **Google Workspace as distribution layer** — 3B+ users across Gmail, Drive, Docs, Sheets without separate onboarding
+- **Gemini as the intelligence layer** — native integration with Google's frontier models at every tier
+- **Trust and enterprise compliance** — Google Workspace data stays within tenant boundaries; admins control access and auditability
+- **Google Cloud as execution substrate** — Cloud Run, Vertex AI, and Workspace APIs enable enterprise-grade deployment at scale
 
 ### Success Metrics
 
-North Star: tasks successfully completed per user per day.
+North Star: Google Workspace tasks completed via AI per user per day.
 
 Supporting metrics:
 
-- time saved per task
-- D7 and D30 retention
-- task success rate
-- tool invocation accuracy
-
-### Why Microsoft Wins
-
-- **Windows as distribution layer** — ships to billions of devices without separate onboarding
-- **Microsoft Graph as personal context** — live permissioned data from Outlook, Teams, Calendar, SharePoint, OneDrive
-- **Enterprise trust and compliance** — data stays within the M365 tenant boundary; admins control access, auditability, and policy
-- **Office deep integration** — first-party API access to Word, Excel, PowerPoint enables capabilities that third-party tools cannot replicate
+- time saved per task (target: 3+ minutes per completed workflow)
+- D7 and D30 retention on action completions
+- task success rate across action types
+- tool invocation accuracy vs. user intent
 
 ---
 
@@ -109,7 +109,7 @@ Supporting metrics:
 
 **Backend**
 - FastAPI on Python 3.12
-- Gemini `gemini-3-flash-preview` (primary) + `gemini-2.5-flash` (fallback)
+- Gemini `gemini-3-flash-preview` (primary) + `gemini-2.5-flash` (fast router + fallback)
 - Gemini image model for image generation
 - ChromaDB + `sentence-transformers/all-MiniLM-L6-v2` for local vector search
 - LangChain for document parsing and chunking
@@ -131,8 +131,8 @@ Supporting metrics:
 ### 1. Clone and install frontend
 
 ```bash
-git clone https://github.com/cornell880503-bot/Microsoft-copilot-demo
-cd Microsoft-copilot-demo
+git clone https://github.com/cornell880503-bot/microsoft-copilot-demo
+cd microsoft-copilot-demo
 npm install
 ```
 
@@ -193,15 +193,16 @@ Every time the user sends a message:
 
 ```
 1. Detect the previously active app
-2. Fast router decides: action type + whether screenshot and RAG are needed
+2. Fast router (gemini-2.5-flash): decide action(s) + whether screenshot and RAG are needed
 3. Extract live text from the open document (when supported)
 4. Capture current app window only if visual grounding is needed
 5. Run semantic search only if local retrieval is needed
 6. Call execution model with selected context, memory, and conversation history
 7. Execute chosen action — deterministic analytics, Python code, or direct response
 8. If Python code errors: auto-repair via stderr → Gemini → re-run
-9. Stream results and timing back to frontend via SSE
-10. Persist conversation to disk and generate a title
+9. For multi-action plans: chain subsequent actions with carry-forward context
+10. Stream results and timing back to frontend via SSE
+11. Persist conversation and pipeline logs to disk; generate conversation title
 ```
 
 ---
@@ -227,14 +228,15 @@ Every time the user sends a message:
 
 | Feature | Description |
 |---------|-------------|
-| **Fast Intent Router** | Low-latency routing stage (`gemini-2.5-flash`) decides action, screenshot need, and RAG need before the heavy execution path runs |
-| **Real Python Code Execution** | Agent writes pandas / matplotlib code, runs it in a subprocess, streams the actual output back |
-| **Self-Healing Code** | On execution error, stderr is fed back to Gemini which rewrites and re-runs the code automatically |
-| **Chart Generation** | Draws bar charts, pie charts, histograms, scatter plots and saves to Downloads |
-| **Conditional Visual Context** | Screenshots and browser page fetches triggered only when the fast router flags the task as needing them |
-| **Webpage Summarization** | Fetches the active browser tab's full text on demand for summarization or document merging |
-| **Document-Aware Context** | Extracts live text from open Excel, Numbers, CSV, Word, PDF files with column-level hints for accurate analysis |
-| **Auto-locate Files** | Extracts filenames from natural language queries (including mixed Chinese/English) and resolves them automatically |
+| **Two-stage Gemini Routing** | `gemini-2.5-flash` fast router decides action + screenshot + RAG needs before the execution model runs |
+| **Multi-action Orchestration** | Fast router can output multiple sequential actions; execution model chains them with carry-forward context |
+| **Real Python Code Execution** | Agent writes pandas / matplotlib code, runs it in a subprocess, streams actual output back |
+| **Self-Healing Code** | On execution error, stderr is fed back to Gemini which rewrites and re-runs automatically |
+| **Chart Generation** | Bar charts, pie charts, histograms, scatter plots saved to Downloads |
+| **Conditional Visual Context** | Screenshots and browser fetches triggered only when fast router flags the task as needing them |
+| **Webpage Summarization** | Fetches the active browser tab's full text on demand |
+| **Document-Aware Context** | Extracts live text from open Excel, Numbers, CSV, Word, PDF with column-level hints |
+| **Auto-locate Files** | Extracts filenames from natural language queries (including mixed Chinese/English) and resolves them |
 | **Multi-format RAG** | Indexes PDF, TXT, CSV, Excel, Word across Downloads / Documents / Desktop; newly saved files indexed immediately |
 | **Numbers Workbook Support** | Reads live Apple Numbers workbooks via CSV export, falls back across sheets/tables |
 | **Deterministic Spreadsheet Analytics** | Fast-path for common metrics and data-shape questions without freeform codegen |
@@ -242,11 +244,11 @@ Every time the user sends a message:
 | **File Delete with Candidate Ranking** | RAG ranks the most relevant local files; user selects before deletion |
 | **Full-stack Undo** | ActionLedger snapshots state before every write/delete/meeting; Cmd+Z or button restores |
 | **Proactive Suggestions** | Background monitor surfaces context-aware quick prompts on app open |
-| **Calendar Integration** | Reads macOS Calendar for structured events; screenshot understanding for Lark/Google Calendar |
 | **Image Generation** | Gemini image model with auto-enhanced prompt, result displayed inline |
-| **Email Sending** | Drafts email, auto-attaches chart or document, sends via SMTP |
+| **Email Sending** | Drafts email, auto-attaches chart or document, sends via SMTP (Gmail-compatible) |
 | **Schedule Meeting** | Natural language → `.ics` → system calendar |
 | **Multi-turn Memory** | Conversation context persists across messages and sessions |
+| **Pipeline Log Persistence** | Demo Mode preserves the full CTX/THINK/RAG reasoning trace across app restarts |
 | **Conversation Sidebar** | Create, switch, rename, delete conversations with auto-generated titles |
 | **Demo / User Mode** | Demo Mode shows reasoning traces and pipeline scores; User Mode presents a clean consumer interface |
 | **Privacy Modes** | Safe Mode and Enhanced Mode give users control over screen context usage |
@@ -259,7 +261,7 @@ Every time the user sends a message:
 - document text is extracted locally and sent only to the Gemini API
 - screenshots are captured only for intents that need visual grounding and discarded after processing
 - temporary files are deleted immediately after use
-- conversations are stored locally in `~/.copilot/chats/`
+- conversations are stored locally in `~/.sierra/chats/`
 - Python code is executed locally in a sandboxed subprocess
 - proactive assistance supports Safe and Enhanced privacy modes
 
@@ -269,14 +271,14 @@ Every time the user sends a message:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GEMINI_API_KEY` | required | Gemini API key |
+| `GEMINI_API_KEY` | required | Gemini API key from Google AI Studio |
 | `GEMINI_MODEL` | `gemini-3-flash-preview` | Primary reasoning model |
 | `GEMINI_FALLBACK_MODEL` | `gemini-2.5-flash` | Fallback model on 503 |
 | `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image-preview` | Image generation model |
-| `SMTP_HOST` | none | SMTP server hostname |
+| `SMTP_HOST` | none | SMTP server hostname (e.g. `smtp.gmail.com`) |
 | `SMTP_PORT` | `587` | SMTP port |
-| `SMTP_USER` | none | SMTP username or email address |
-| `SMTP_PASS` | none | SMTP password or app password |
+| `SMTP_USER` | none | Gmail address |
+| `SMTP_PASS` | none | Gmail app password |
 | `EXTRA_DATA_DIRS` | none | Additional directories for RAG indexing |
 
 ---
@@ -284,11 +286,11 @@ Every time the user sends a message:
 ## Project Structure
 
 ```
-Microsoft-copilot-demo/
+sierra-command-center/
 ├── docs/                      # PM strategy, metrics, experiment plan, privacy design
 ├── electron/                  # Electron main process
 ├── server/                    # FastAPI backend and agent pipeline
-│   ├── agent.py               # Orchestrator: routing, execution, SSE streaming
+│   ├── agent.py               # Orchestrator: routing, execution, multi-action, SSE streaming
 │   ├── main.py                # FastAPI app, endpoints, action ledger integration
 │   ├── action_ledger.py       # Undo system: LIFO snapshot/restore stack
 │   ├── data_analytics.py      # Deterministic spreadsheet analytics fast path

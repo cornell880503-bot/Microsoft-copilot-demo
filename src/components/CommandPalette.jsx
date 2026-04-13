@@ -6,13 +6,15 @@ const SIDECAR = 'http://127.0.0.1:8765';
 
 /* ─── Helpers ───────────────────────────────────────────────────────────────── */
 function CopilotIcon({ size = 18 }) {
+  // Google G-shaped icon in 4 brand colors
   return (
     <svg width={size} height={size} viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
       <defs>
         <linearGradient id="cg-cp" x1="0" y1="0" x2="20" y2="20" gradientUnits="userSpaceOnUse">
-          <stop offset="0%"   stopColor="#0F6CBD" />
-          <stop offset="50%"  stopColor="#8661C5" />
-          <stop offset="100%" stopColor="#C239B3" />
+          <stop offset="0%"   stopColor="#4285F4" />
+          <stop offset="33%"  stopColor="#EA4335" />
+          <stop offset="66%"  stopColor="#FBBC04" />
+          <stop offset="100%" stopColor="#34A853" />
         </linearGradient>
       </defs>
       <path d="M10 2C10 2 13.5 5 18 5C18 5 15 8.5 18 13C18 13 13.5 12 10 18C10 18 6.5 12 2 13C2 13 5 8.5 2 5C2 5 6.5 5 10 2Z" fill="url(#cg-cp)" opacity="0.92" />
@@ -151,7 +153,7 @@ function Sidebar({ chats, activeChatId, onNewChat, onSelectChat, onDeleteChat, o
       <div className="sidebar-header">
         <div className="sidebar-logo">
           <CopilotIcon size={16} />
-          <span className="sidebar-logo-label">Copilot</span>
+          <span className="sidebar-logo-label">Sierra</span>
         </div>
         <button className="new-chat-btn" onClick={onNewChat} title="New Chat" aria-label="New Chat">+</button>
       </div>
@@ -522,10 +524,10 @@ export default function CommandPalette() {
         ) : (
           <div className="empty-state">
             <div className="empty-state-icon"><CopilotIcon size={36} /></div>
-            <div className="empty-state-title">How can I help you?</div>
+            <div className="empty-state-title">Sierra Command Center</div>
             <div className="empty-state-sub">
-              Ask anything — I can search your files, draft content,<br />
-              generate images, and take actions.
+              Powered by Gemini — search files, draft content,<br />
+              analyze data, and take actions across Google Workspace.
             </div>
           </div>
         )}

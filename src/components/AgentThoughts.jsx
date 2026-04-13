@@ -8,9 +8,9 @@ function SparkleIcon({ size = 14 }) {
     <svg width={size} height={size} viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
       <defs>
         <linearGradient id="cg-at" x1="0" y1="0" x2="20" y2="20" gradientUnits="userSpaceOnUse">
-          <stop offset="0%"   stopColor="#0F6CBD" />
-          <stop offset="50%"  stopColor="#8661C5" />
-          <stop offset="100%" stopColor="#C239B3" />
+          <stop offset="0%"   stopColor="#4285F4" />
+          <stop offset="50%"  stopColor="#1A73E8" />
+          <stop offset="100%" stopColor="#34A853" />
         </linearGradient>
       </defs>
       <path
@@ -27,15 +27,15 @@ function SparkleIcon({ size = 14 }) {
    ══════════════════════════════════════════════════════════════ */
 
 const TYPE_STYLES = {
-  user:    { bar: '#C239B3', label: 'YOU'   },
-  context: { bar: '#0F6CBD', label: 'CTX'   },
-  search:  { bar: '#8661C5', label: 'RAG'   },
-  think:   { bar: '#F7630C', label: 'THINK' },
-  result:  { bar: '#107C10', label: 'DONE'  },
-  info:    { bar: '#0F6CBD', label: 'INFO'  },
-  process: { bar: '#8661C5', label: 'PROC'  },
-  success: { bar: '#107C10', label: 'DONE'  },
-  error:   { bar: '#D13438', label: 'ERR'   },
+  user:    { bar: '#34A853', label: 'YOU'   },
+  context: { bar: '#4285F4', label: 'CTX'   },
+  search:  { bar: '#1A73E8', label: 'RAG'   },
+  think:   { bar: '#FBBC04', label: 'THINK' },
+  result:  { bar: '#34A853', label: 'DONE'  },
+  info:    { bar: '#4285F4', label: 'INFO'  },
+  process: { bar: '#1A73E8', label: 'PROC'  },
+  success: { bar: '#34A853', label: 'DONE'  },
+  error:   { bar: '#EA4335', label: 'ERR'   },
   heal:    { bar: '#FF8C00', label: 'HEAL'  },
 };
 
@@ -84,11 +84,11 @@ function ThoughtEntry({ thought, onActionConfirm, onActionCancel, onEmailFile, o
 
 function ResultCard({ thought }) {
   const actionColors = {
-    SEARCH_LOCAL_DOCS: '#8661C5',
-    DRAFT_CONTENT:     '#0F6CBD',
-    GENERATE_IMAGE:    '#F7630C',
+    SEARCH_LOCAL_DOCS: '#1A73E8',
+    DRAFT_CONTENT:     '#4285F4',
+    GENERATE_IMAGE:    '#FBBC04',
   };
-  const color = actionColors[thought.action] || '#107C10';
+  const color = actionColors[thought.action] || '#34A853';
   return (
     <div className="result-card">
       <div className="result-thought">
@@ -149,12 +149,12 @@ function MarkdownText({ text }) {
 
 /* ── Historical action card (loaded from disk) ───────────────────────────────── */
 const ACTION_META_HIST = {
-  SEND_EMAIL:       { icon: '📧', color: '#0F6CBD', bg: 'rgba(15,108,189,0.06)', label: (p) => `Sent to ${p.to || '?'} — "${p.subject || ''}"` },
-  SAVE_FILE:        { icon: '💾', color: '#107C10', bg: 'rgba(16,124,16,0.06)',  label: (p) => `Saved ${p.filename || 'file'}` },
-  SCHEDULE_MEETING: { icon: '📅', color: '#8661C5', bg: 'rgba(134,97,197,0.07)', label: (p) => `Meeting: ${p.title || '?'} on ${p.date || '?'} at ${p.time || '?'}` },
-  DELETE_FILE:      { icon: '🗑️', color: '#D13438', bg: 'rgba(209,52,56,0.06)',  label: (p) => `Deleted ${p.filename || p.path || 'file'}` },
-  OPEN_APP:         { icon: '🚀', color: '#F7630C', bg: 'rgba(247,99,12,0.06)',  label: (p) => `Opened ${p.app || '?'}` },
-  GENERATE_IMAGE:   { icon: '🖼',  color: '#8661C5', bg: 'rgba(134,97,197,0.07)', label: ()  => 'Image generated' },
+  SEND_EMAIL:       { icon: '📧', color: '#4285F4', bg: 'rgba(66,133,244,0.06)',  label: (p) => `Sent to ${p.to || '?'} — "${p.subject || ''}"` },
+  SAVE_FILE:        { icon: '💾', color: '#34A853', bg: 'rgba(52,168,83,0.06)',   label: (p) => `Saved ${p.filename || 'file'}` },
+  SCHEDULE_MEETING: { icon: '📅', color: '#1A73E8', bg: 'rgba(26,115,232,0.06)', label: (p) => `Meeting: ${p.title || '?'} on ${p.date || '?'} at ${p.time || '?'}` },
+  DELETE_FILE:      { icon: '🗑️', color: '#EA4335', bg: 'rgba(234,67,53,0.06)',  label: (p) => `Deleted ${p.filename || p.path || 'file'}` },
+  OPEN_APP:         { icon: '🚀', color: '#FBBC04', bg: 'rgba(251,188,4,0.08)',   label: (p) => `Opened ${p.app || '?'}` },
+  GENERATE_IMAGE:   { icon: '🖼',  color: '#1A73E8', bg: 'rgba(26,115,232,0.06)', label: ()  => 'Image generated' },
 };
 
 function HistoricalActionCard({ content }) {
@@ -180,7 +180,7 @@ function HistoricalActionCard({ content }) {
       payload = JSON.parse(jsonStr);
     } catch { /* use empty payload */ }
 
-    const m = ACTION_META_HIST[action] || { icon: '⚡', color: '#8661C5', bg: 'rgba(134,97,197,0.07)', label: () => action };
+    const m = ACTION_META_HIST[action] || { icon: '⚡', color: '#1A73E8', bg: 'rgba(134,97,197,0.07)', label: () => action };
     return (
       <div style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 11px',
         background: m.bg, border:`1px solid ${m.color}33`, borderRadius:8, fontSize:12, color: m.color }}>
@@ -372,8 +372,8 @@ export default function AgentThoughts({ thoughts, isProcessing, onActionConfirm,
       ))}
       {isProcessing && (
         <div className="thought-entry">
-          <span className="thought-bar" style={{ background: '#F7630C' }} />
-          <span className="thought-tag" style={{ color: '#F7630C' }}>THINK</span>
+          <span className="thought-bar" style={{ background: '#FBBC04' }} />
+          <span className="thought-tag" style={{ color: '#FBBC04' }}>THINK</span>
           <span className="typing-dots"><span /><span /><span /></span>
         </div>
       )}

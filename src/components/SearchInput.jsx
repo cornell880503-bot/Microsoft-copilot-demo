@@ -29,7 +29,7 @@ export default function SearchInput({ value, onChange, onSubmit, isProcessing })
         ref={inputRef}
         type="text"
         className="search-input"
-        placeholder="Ask Copilot anything..."
+        placeholder="Ask Sierra anything..."
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}

@@ -6,7 +6,7 @@ export default function ImageResultCard({ thought, imageData, prompt }) {
   const handleDownload = () => {
     const a = document.createElement('a');
     a.href = imageData;
-    a.download = 'copilot-generated.png';
+    a.download = 'sierra-generated.png';
     a.click();
   };
 

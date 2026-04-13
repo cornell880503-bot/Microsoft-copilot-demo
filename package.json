@@ -1,7 +1,7 @@
 {
-  "name": "project-orion",
+  "name": "sierra-command-center",
   "version": "1.0.0",
-  "description": "Project Orion - AI Command Palette for Windows 11",
+  "description": "Sierra Command Center - AI Command Palette powered by Gemini for Google Workspace",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -26,8 +26,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.microsoft.project-orion",
-    "productName": "Project Orion",
+    "appId": "com.google.sierra",
+    "productName": "Sierra Command Center",
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
