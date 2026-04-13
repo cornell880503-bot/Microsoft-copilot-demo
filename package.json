@@ -1,7 +1,7 @@
 {
-  "name": "sierra-command-center",
+  "name": "gemini-command-center",
   "version": "1.0.0",
-  "description": "Sierra Command Center - AI Command Palette powered by Gemini for Google Workspace",
+  "description": "Gemini Command Center - Agentic AI desktop assistant powered by Google Gemini for Google Workspace",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -26,8 +26,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.google.sierra",
-    "productName": "Sierra Command Center",
+    "appId": "com.google.gemini-command-center",
+    "productName": "Gemini Command Center",
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
